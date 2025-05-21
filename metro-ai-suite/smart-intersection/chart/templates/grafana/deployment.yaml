@@ -15,6 +15,8 @@ spec:
       labels:
         app: {{ .Release.Name }}-grafana
     spec:
+      securityContext:
+        fsGroup: 0
       containers:
         - name: grafana
           image: "{{ .Values.grafana.repository }}:{{ .Values.grafana.tag }}"
@@ -43,7 +45,6 @@ spec:
           securityContext:
             runAsUser: 0
             runAsGroup: 0
-            fsGroup: 0
       volumes:
         - name: grafana-storage
           persistentVolumeClaim:
