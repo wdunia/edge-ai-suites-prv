@@ -1,13 +1,14 @@
+{{- if .Values.storage.pv.enabled }}
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: smart-intersection-pgserver-media
+  name: {{ .Release.Name }}-pgserver-media
   labels:
     app.kubernetes.io/managed-by: Helm
   annotations:
-    meta.helm.sh/release-name: smart-intersection
-    meta.helm.sh/release-namespace: smart-intersection
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
 spec:
   capacity:
     storage: 1Gi
@@ -16,3 +17,4 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   hostPath:
     path: /mnt/data/smart-intersection-pgserver-media
+{{- end }}
