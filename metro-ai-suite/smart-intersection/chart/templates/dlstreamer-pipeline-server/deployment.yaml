@@ -14,6 +14,8 @@ spec:
       labels:
         app: {{ .Release.Name }}-dlstreamer-pipeline-server
     spec:
+      securityContext:
+        fsGroup: 0
       volumes:
       - name: dlstreamer-pipeline-server-videos-data
         persistentVolumeClaim:
@@ -85,7 +87,6 @@ spec:
         securityContext:
           runAsUser: 0
           runAsGroup: 0
-          fsGroup: 0
         command: ["/bin/bash", "-c"]
         args:
           - |
