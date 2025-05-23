@@ -86,6 +86,6 @@ spec:
       - name: secrets
         secret:
           secretName: {{ .Release.Name }}-web-secrets
-      - name:  {{ .Release.Name }}-ri-web-data
+      - name: {{ .Release.Name }}-ri-web-data
         persistentVolumeClaim:
           claimName: {{ .Release.Name }}-ri-pvc
