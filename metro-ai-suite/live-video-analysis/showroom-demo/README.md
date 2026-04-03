@@ -12,9 +12,8 @@ the USB camera feed into the pipeline.
 
 ---
 
-## First-time setup
-
-> Skip this section if you have already run a demo on this machine before.
+<details>
+<summary>🔧 First-time setup</summary>
 
 **1. Install system dependencies** (GStreamer, V4L2, Python GObject bindings):
 
@@ -33,11 +32,10 @@ ls /dev/video*        # expect /dev/video0 (and /dev/video2 for a second camera)
 If the device node is not `/dev/video0`, update the two `CameraFactory` lines at the bottom
 of `camera-rtsp.py` to match.
 
----
+</details>
 
-## One-time setup for live-video-captioning
-
-> Skip this section if the captioning demo has already been set up on this machine.
+<details>
+<summary>⚙️ One-time setup for live-video-captioning</summary>
 
 Before running `run-demo-captioning.sh` for the first time, complete the setup steps in the
 application's own guide — specifically **Configure Environment** (`.env` file) and
@@ -45,9 +43,11 @@ application's own guide — specifically **Configure Environment** (`.env` file)
 
 📄 [`../live-video-captioning/docs/user-guide/get-started.md`](../live-video-captioning/docs/user-guide/get-started.md)
 
+</details>
+
 ---
 
-## Running a demo
+## 🚀 Running a demo
 
 ```bash
 ./run-demo-alert.sh       # launch the alert-agent demo
@@ -63,7 +63,8 @@ The script will:
 
 Press **Ctrl+C** at any time to stop — containers are shut down automatically.
 
-### Overriding defaults
+<details>
+<summary>🔀 Overriding defaults</summary>
 
 Environment variables can be passed inline or set before running:
 
@@ -79,9 +80,11 @@ TAG=1.1.0 ./run-demo-captioning.sh
 | `REGISTRY` | `intel/` | Docker image registry prefix |
 | `RTSP_URL` | *(per script)* | RTSP stream URL passed to the containers |
 
+</details>
+
 ---
 
-## Troubleshooting
+## 🛠️ Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
@@ -92,7 +95,7 @@ TAG=1.1.0 ./run-demo-captioning.sh
 
 ---
 
-## Reference
+## 📚 Reference
 
 <details>
 <summary>How the RTSP camera server works</summary>
@@ -113,6 +116,14 @@ and keeps CPU usage and latency low.
 
 Register the new project's directory name in the `DEMO_DIRS` list in `stop-all-demos.sh`.
 No changes to any other script are needed.
+
+</details>
+
+<details>
+<summary>Full application documentation</summary>
+
+- 📄 [live-video-alert-agent — Get Started](../live-video-alert-agent/docs/user-guide/get-started.md)
+- 📄 [live-video-captioning — Get Started](../live-video-captioning/docs/user-guide/get-started.md)
 
 </details>
 
