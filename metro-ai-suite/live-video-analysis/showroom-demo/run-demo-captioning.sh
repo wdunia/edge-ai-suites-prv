@@ -13,7 +13,7 @@ APP_URL="http://localhost:4173"
 
 cleanup() {
   echo "Stopping containers..."
-  docker compose -f "$BASE_DIR/docker-compose.yml" down
+  docker compose -f "$BASE_DIR/compose.yaml" down
   exit 0
 }
 
@@ -22,7 +22,7 @@ trap cleanup SIGINT SIGTERM
 bash "$SCRIPT_DIR/stop-all-demos.sh"
 
 echo "Starting live-video-captioning..."
-docker compose -f "$BASE_DIR/docker-compose.yml" up -d
+docker compose -f "$BASE_DIR/compose.yaml" up -d
 
 echo "App URL: $APP_URL"
 sleep 3
