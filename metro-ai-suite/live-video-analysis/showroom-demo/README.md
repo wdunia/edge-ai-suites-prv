@@ -35,6 +35,18 @@ of `camera-rtsp.py` to match.
 
 ---
 
+## One-time setup for live-video-captioning
+
+> Skip this section if the captioning demo has already been set up on this machine.
+
+Before running `run-demo-captioning.sh` for the first time, complete the setup steps in the
+application's own guide — specifically **Configure Environment** (`.env` file) and
+**Download/Export Models**:
+
+📄 [`../live-video-captioning/docs/user-guide/get-started.md`](../live-video-captioning/docs/user-guide/get-started.md)
+
+---
+
 ## Running a demo
 
 ```bash
