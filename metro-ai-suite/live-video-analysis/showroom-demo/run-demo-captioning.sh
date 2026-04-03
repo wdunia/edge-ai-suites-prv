@@ -1,30 +1,32 @@
 #!/bin/bash
 set -e
 
-export REGISTRY="intel/"
-export TAG="1.0.0"
-export TARGET_DEVICE=GPU
-export RTSP_URL="rtsp://host.docker.internal:8555/c1"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+BASE_DIR=$(cd "$SCRIPT_DIR/../live-video-captioning" && pwd)
 
-BASE_DIR=../live-video-captioning
+export REGISTRY="${REGISTRY:-intel/}"
+export TAG="${TAG:-1.0.0}"
+export TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
+export RTSP_URL="${RTSP_URL:-rtsp://host.docker.internal:8555/c1}"
+
+APP_URL="http://localhost:4173"
 
 cleanup() {
   echo "Stopping containers..."
-  cd "$BASE_DIR"
-  docker compose down
+  docker compose -f "$BASE_DIR/docker-compose.yml" down
   exit 0
 }
 
 trap cleanup SIGINT SIGTERM
 
-cd "$BASE_DIR"
-docker ps -aq | xargs -r docker stop
-docker ps -aq | xargs -r docker rm
-docker compose up -d
+bash "$SCRIPT_DIR/stop-all-demos.sh"
 
-echo "App URL: http://localhost:4173"
+echo "Starting live-video-captioning..."
+docker compose -f "$BASE_DIR/docker-compose.yml" up -d
 
-cd ~/demo
+echo "App URL: $APP_URL"
 sleep 3
-xdg-open http://localhost:4173
+xdg-open "$APP_URL" &
+
+cd "$SCRIPT_DIR"
 python3 camera-rtsp.py
