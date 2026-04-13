@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Live Video Alert Agent</title>
-    <!-- External Libraries -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Tailwind CSS (built at Docker image build time, no runtime JS needed) -->
+    <link rel="stylesheet" href="/static/css/tailwind.css">
+    <!-- Chart.js: CDN with local fallback for offline support -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"
+            onerror="this.replaceWith(Object.assign(document.createElement('script'),{src:'/static/js/chart.umd.min.js'}))">
+    </script>
     <!-- Custom Styles -->
     <link rel="stylesheet" href="/static/css/styles.css">
 </head>
