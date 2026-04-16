@@ -1,5 +1,9 @@
 #!/bin/bash
+set -e
+
 sudo apt update
+
+# GStreamer, V4L2 and Python GObject bindings for camera-rtsp.py
 sudo apt install -y \
 	python3-gi \
 	python3-gi-cairo \
@@ -13,3 +17,17 @@ sudo apt install -y \
 	gstreamer1.0-libav \
 	gstreamer1.0-tools \
 	v4l-utils
+
+# H.264 codec support for Firefox (required for WebRTC video playback)
+sudo apt install -y ffmpeg
+if snap list firefox &>/dev/null; then
+	echo "Snap-based Firefox detected — installing extra codec support..."
+	sudo snap connect firefox:hardware-observe 2>/dev/null || true
+	sudo apt install -y ubuntu-restricted-extras ubuntu-restricted-addons 2>/dev/null || true
+fi
+
+echo ""
+echo "Done. If Firefox still cannot play H.264 video, open about:config and verify:"
+echo "  media.gmp-gmpopenh264.enabled = true"
+echo "  media.peerconnection.video.h264_enabled = true"
+

@@ -90,8 +90,17 @@ TAG=1.1.0 ./run-demo-captioning.sh
 |---------|-----|
 | `No such file or directory: /dev/video0` | Check USB connection; run `dmesg \| tail -20` |
 | Video stream is black or missing | Run `./list-camera-formats.sh` and update device paths in `camera-rtsp.py` |
+| Video panel says "unable to connect" or shows no video in Firefox | H.264 codec missing — see **Firefox H.264 fix** below |
 | Browser does not open automatically | Navigate manually to the URL shown in the terminal |
 | Docker Compose fails to start | Check that images exist: `docker images \| grep live-video` |
+
+**Firefox H.264 fix** — Firefox on Ubuntu (especially Snap) may lack H.264 support:
+
+1. Run `./install-dependencies.sh` to install `ffmpeg` and codec packages.
+2. Open `about:config` in Firefox and verify:
+   - `media.gmp-gmpopenh264.enabled` → `true`
+   - `media.peerconnection.video.h264_enabled` → `true`
+3. Restart Firefox.
 
 ---
 
