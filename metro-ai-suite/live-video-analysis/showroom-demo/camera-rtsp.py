@@ -7,14 +7,18 @@ from gi.repository import Gst, GstRtspServer, GLib
 Gst.init(None)
 
 class CameraFactory(GstRtspServer.RTSPMediaFactory):
-    def __init__(self, device):
+    def __init__(self, device, width=1280, height=720, framerate=10):
         super().__init__()
         self.set_launch(
-            f"( v4l2src device={device} ! "
-            "image/jpeg,width=1280,height=720,framerate=15/1 ! "
-            "jpegdec ! "
+            f"( v4l2src device={device} do-timestamp=true num-buffers=-1 ! "
+            f"image/jpeg,width={width},height={height},framerate={framerate}/1 ! "
+            "queue max-size-buffers=3 leaky=downstream ! "
+            "jpegdec max-errors=-1 ! "
+            "queue max-size-buffers=3 leaky=downstream ! "
             "videoconvert ! "
-            "x264enc tune=zerolatency bitrate=1000 speed-preset=superfast !"
+            f"videorate drop-only=true ! video/x-raw,framerate={framerate}/1 ! "
+            "x264enc tune=zerolatency bitrate=1500 speed-preset=superfast "
+            "key-int-max=30 bframes=0 ! "
             "rtph264pay config-interval=1 name=pay0 pt=96 )"
         )
         self.set_shared(True)
