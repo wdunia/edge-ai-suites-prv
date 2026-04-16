@@ -16,7 +16,8 @@ class CameraFactory(GstRtspServer.RTSPMediaFactory):
             f"( v4l2src device={device} ! "
             f"image/jpeg,width={width},height={height},framerate={framerate}/1 ! "
             "jpegdec ! videoconvert ! "
-            "x264enc tune=zerolatency bitrate=1500 speed-preset=ultrafast ! "
+            "openh264enc complexity=low bitrate=1500000 ! "
+            "video/x-h264,profile=baseline ! "
             "rtph264pay config-interval=1 name=pay0 pt=96 )"
         )
         self.set_shared(True)
