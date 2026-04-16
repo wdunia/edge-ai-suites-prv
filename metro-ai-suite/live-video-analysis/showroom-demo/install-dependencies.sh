@@ -20,11 +20,6 @@ sudo apt install -y \
 
 # H.264 codec support for Firefox (required for WebRTC video playback)
 sudo apt install -y ffmpeg
-if snap list firefox &>/dev/null; then
-	echo "Snap-based Firefox detected — installing extra codec support..."
-	sudo snap connect firefox:hardware-observe 2>/dev/null || true
-	sudo apt install -y ubuntu-restricted-extras ubuntu-restricted-addons 2>/dev/null || true
-fi
 
 echo ""
 echo "Done. If Firefox still cannot play H.264 video, open about:config and verify:"
