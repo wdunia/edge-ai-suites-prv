@@ -19,6 +19,19 @@ class CameraFactory(GstRtspServer.RTSPMediaFactory):
         )
         self.set_shared(True)
 
+class CameraFactory2(GstRtspServer.RTSPMediaFactory):
+    def __init__(self, device, width=1280, height=720, framerate=30):
+        super().__init__()
+        self.set_launch(
+            f"( v4l2src device={device} do-timestamp=true ! "
+            f"image/jpeg,width={width},height={height},framerate={framerate}/1 ! "
+            "jpegdec !"
+            "videoconvert ! "
+            "x264enc tune=zerolatency bitrate=2000 speed-preset=superfast ! "
+            "rtph264pay config-interval=1 name=pay0 pt=96 )"
+        )
+        self.set_shared(True)
+
 
 server = GstRtspServer.RTSPServer()
 server.set_service("8555")
