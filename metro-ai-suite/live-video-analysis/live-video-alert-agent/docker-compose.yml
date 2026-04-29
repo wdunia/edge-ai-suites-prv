@@ -89,7 +89,7 @@ services:
       - PORT=${PORT:-9000}
     volumes:
       - ./resources:/temp/resources
-      - ./src/ui/:/app/ui/
+      - ./src/ui/:/app/src/ui/
     depends_on:
       ovms:
         condition: service_healthy
