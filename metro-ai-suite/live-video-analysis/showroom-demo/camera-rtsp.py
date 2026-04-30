@@ -36,8 +36,8 @@ class CameraFactory2(GstRtspServer.RTSPMediaFactory):
 server = GstRtspServer.RTSPServer()
 server.set_service("8555")
 mounts = server.get_mount_points()
-mounts.add_factory("/c1", CameraFactory('/dev/video0'))
-mounts.add_factory("/c2", CameraFactory('/dev/video2'))
+mounts.add_factory("/c1", CameraFactory2('/dev/video0'))
+mounts.add_factory("/c2", CameraFactory2('/dev/video2'))
 server.attach(None)
 
 print("RTSP server running:")

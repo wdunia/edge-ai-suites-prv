@@ -21,6 +21,30 @@ sudo apt install -y \
 # H.264 codec support for Firefox (required for WebRTC video playback)
 sudo apt install -y ffmpeg
 
+# Docker Engine (skipped if already installed)
+if ! command -v docker &> /dev/null; then
+	echo "Installing Docker..."
+	sudo apt install -y ca-certificates curl
+	sudo install -m 0755 -d /etc/apt/keyrings
+	curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc > /dev/null
+	sudo chmod a+r /etc/apt/keyrings/docker.asc
+	echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+		sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+	sudo apt update
+	sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+	sudo systemctl enable --now docker
+else
+	echo "Docker already installed, skipping."
+	# Ensure compose plugin is present
+	sudo apt install -y docker-compose-plugin 2>/dev/null || true
+fi
+
+# Add current user to docker group (avoids needing sudo for docker commands)
+if ! groups "$USER" | grep -q '\bdocker\b'; then
+	sudo usermod -aG docker "$USER"
+	echo "Added $USER to docker group. Log out and back in for it to take effect."
+fi
+
 echo ""
 echo "Done. If Firefox still cannot play H.264 video, open about:config and verify:"
 echo "  media.gmp-gmpopenh264.enabled = true"
