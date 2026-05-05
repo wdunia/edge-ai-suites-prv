@@ -37,24 +37,28 @@ class CameraFactory2(GstRtspServer.RTSPMediaFactory):
 
 
 class FileFactory(GstRtspServer.RTSPMediaFactory):
-    """Streams a local MP4/MKV file in a loop as H.264 RTSP."""
+    """Streams a local MP4 file as H.264 RTSP (loops via re-encode with live timestamps)."""
     def __init__(self, filepath):
         super().__init__()
         self.set_launch(
-            f"( filesrc location={filepath} ! qtdemux ! h264parse ! "
-            "rtph264pay config-interval=1 name=pay0 pt=96 )"
+            f"( filesrc location={filepath} ! qtdemux ! avdec_h264 ! videoconvert ! "
+            "videorate ! video/x-raw,framerate=15/1 ! "
+            "x264enc tune=zerolatency speed-preset=ultrafast bitrate=1500 key-int-max=30 ! "
+            "h264parse config-interval=1 ! rtph264pay name=pay0 pt=96 )"
         )
         self.set_shared(True)
-        # EOS → restart from beginning (loop)
         self.connect("media-configure", self._on_media_configure)
 
     @staticmethod
     def _on_media_configure(factory, media):
-        media.set_pipeline_state(Gst.State.PLAYING)
-        # Loop: seek back to start on EOS
+        """On EOS, seek back to start for infinite loop."""
         def on_eos(bus, msg):
-            pipeline = media.get_element()
-            pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, 0)
+            element = media.get_element()
+            element.seek_simple(
+                Gst.Format.TIME,
+                Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT,
+                0
+            )
         element = media.get_element()
         bus = element.get_bus()
         bus.add_signal_watch()
