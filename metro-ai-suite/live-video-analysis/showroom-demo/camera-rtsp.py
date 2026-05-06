@@ -37,32 +37,35 @@ class CameraFactory2(GstRtspServer.RTSPMediaFactory):
 
 
 class FileFactory(GstRtspServer.RTSPMediaFactory):
-    """Streams a local MP4 file as H.264 RTSP (loops via re-encode with live timestamps)."""
+    """Streams a pre-looped MP4 file as H.264 RTSP (passthrough, no re-encode)."""
     def __init__(self, filepath):
         super().__init__()
+        # Use the looped file for hours-long uninterrupted streaming
+        looped = self._ensure_looped(filepath)
         self.set_launch(
-            f"( filesrc location={filepath} ! qtdemux ! avdec_h264 ! videoconvert ! "
-            "videorate ! video/x-raw,framerate=15/1 ! "
-            "x264enc tune=zerolatency speed-preset=ultrafast bitrate=1500 key-int-max=30 ! "
-            "h264parse config-interval=1 ! rtph264pay name=pay0 pt=96 )"
+            f"( filesrc location={looped} ! qtdemux ! h264parse config-interval=1 ! "
+            "rtph264pay name=pay0 pt=96 )"
         )
         self.set_shared(True)
-        self.connect("media-configure", self._on_media_configure)
 
     @staticmethod
-    def _on_media_configure(factory, media):
-        """On EOS, seek back to start for infinite loop."""
-        def on_eos(bus, msg):
-            element = media.get_element()
-            element.seek_simple(
-                Gst.Format.TIME,
-                Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT,
-                0
-            )
-        element = media.get_element()
-        bus = element.get_bus()
-        bus.add_signal_watch()
-        bus.connect("message::eos", on_eos)
+    def _ensure_looped(filepath, loops=200):
+        """Create a looped copy of the file (concat without re-encode) if not already done."""
+        looped_path = filepath.replace(".mp4", "_looped.mp4")
+        if os.path.exists(looped_path):
+            return looped_path
+        print(f"  Creating looped file: {looped_path} ({loops}x)...")
+        import subprocess
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-stream_loop", str(loops - 1), "-i", filepath,
+             "-c", "copy", "-an", looped_path],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print(f"  WARNING: ffmpeg failed, using original: {result.stderr[:200]}")
+            return filepath
+        print(f"  Done: {looped_path}")
+        return looped_path
 
 
 server = GstRtspServer.RTSPServer()
