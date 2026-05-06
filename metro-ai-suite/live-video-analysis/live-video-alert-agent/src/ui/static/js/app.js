@@ -440,7 +440,7 @@ async function deleteStream(id) {
 }
 
 async function addNewStream() {
-    if (activeStreams.length >= 3) {
+    if (activeStreams.length >= 8) {
         showToast("Limit reached. Delete an existing stream first", "error");
         return;
     }
