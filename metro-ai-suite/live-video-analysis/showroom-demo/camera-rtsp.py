@@ -4,6 +4,8 @@
 import sys
 import glob
 import os
+import shutil
+import subprocess
 import gi
 gi.require_version('Gst', '1.0')
 gi.require_version('GstRtspServer', '1.0')
@@ -38,27 +40,46 @@ class CameraFactory2(GstRtspServer.RTSPMediaFactory):
 
 class FileFactory(GstRtspServer.RTSPMediaFactory):
     """Streams a pre-looped MP4 file as H.264 RTSP (passthrough, no re-encode)."""
-    def __init__(self, filepath):
+    def __init__(self, filepath, max_fps=30):
         super().__init__()
-        # Use the looped file for hours-long uninterrupted streaming
-        looped = self._ensure_looped(filepath)
+        looped = self._ensure_looped(filepath, max_fps=max_fps)
         self.set_launch(
             f"( filesrc location={looped} ! qtdemux ! h264parse config-interval=1 ! "
             "rtph264pay name=pay0 pt=96 )"
         )
         self.set_shared(True)
+        self.connect("media-configure", self._on_media_configure)
 
     @staticmethod
-    def _ensure_looped(filepath, loops=200):
-        """Create a looped copy of the file (concat without re-encode) if not already done."""
+    def _on_media_configure(factory, media):
+        """On EOS, seek back to start for infinite loop."""
+        def on_eos(bus, msg):
+            element = media.get_element()
+            element.seek_simple(
+                Gst.Format.TIME,
+                Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT,
+                0
+            )
+        element = media.get_element()
+        bus = element.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::eos", on_eos)
+
+    @staticmethod
+    def _ensure_looped(filepath, loops=200, max_fps=30):
+        """Create a looped copy of the file (concat without re-encode, capped FPS)."""
         looped_path = filepath.replace(".mp4", "_looped.mp4")
         if os.path.exists(looped_path):
             return looped_path
-        print(f"  Creating looped file: {looped_path} ({loops}x)...")
-        import subprocess
+
+        if not shutil.which("ffmpeg"):
+            sys.exit("ERROR: ffmpeg not found. Run install-dependencies.sh first.")
+
+        print(f"  Creating looped file: {looped_path} ({loops}x, max {max_fps}fps)...")
         result = subprocess.run(
             ["ffmpeg", "-y", "-stream_loop", str(loops - 1), "-i", filepath,
-             "-c", "copy", "-an", looped_path],
+             "-vf", f"fps={max_fps}", "-c:v", "libx264", "-preset", "ultrafast",
+             "-crf", "18", "-an", looped_path],
             capture_output=True, text=True
         )
         if result.returncode != 0:
@@ -80,7 +101,7 @@ if len(sys.argv) > 1:
     video_dir = sys.argv[1]
     mp4_files = sorted(glob.glob(os.path.join(video_dir, "*.mp4")))
     for i, filepath in enumerate(mp4_files, start=1):
-        endpoint = f"/file{i}"
+        endpoint = f"/f{i}"
         mounts.add_factory(endpoint, FileFactory(filepath))
         file_streams.append((endpoint, filepath))
 
