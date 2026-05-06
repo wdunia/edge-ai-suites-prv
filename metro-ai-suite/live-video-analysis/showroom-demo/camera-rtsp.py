@@ -98,7 +98,7 @@ mounts.add_factory("/c2", CameraFactory2('/dev/video2'))
 file_streams = []
 if len(sys.argv) > 1:
     video_dir = sys.argv[1]
-    mp4_files = sorted(glob.glob(os.path.join(video_dir, "*.mp4")))
+    mp4_files = sorted(f for f in glob.glob(os.path.join(video_dir, "*.mp4")) if not f.endswith("_looped.mp4"))
     for i, filepath in enumerate(mp4_files, start=1):
         endpoint = f"/f{i}"
         mounts.add_factory(endpoint, FileFactory(filepath))
