@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 BASE_DIR=$(cd "$SCRIPT_DIR/../live-video-captioning" && pwd)
 
 export REGISTRY="${REGISTRY:-intel/}"
-export TAG="${TAG:-1.0.0}"
+export TAG="${TAG:-latest}"
 export TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
 export RTSP_URL="${RTSP_URL:-rtsp://host.docker.internal:8555/c1}"
 
