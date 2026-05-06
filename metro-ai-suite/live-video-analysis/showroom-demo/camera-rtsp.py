@@ -40,9 +40,9 @@ class CameraFactory2(GstRtspServer.RTSPMediaFactory):
 
 class FileFactory(GstRtspServer.RTSPMediaFactory):
     """Streams a pre-looped MP4 file as H.264 RTSP (passthrough, no re-encode)."""
-    def __init__(self, filepath, max_fps=30):
+    def __init__(self, filepath):
         super().__init__()
-        looped = self._ensure_looped(filepath, max_fps=max_fps)
+        looped = self._ensure_looped(filepath)
         self.set_launch(
             f"( filesrc location={looped} ! qtdemux ! h264parse config-interval=1 ! "
             "rtph264pay name=pay0 pt=96 )"
@@ -66,8 +66,8 @@ class FileFactory(GstRtspServer.RTSPMediaFactory):
         bus.connect("message::eos", on_eos)
 
     @staticmethod
-    def _ensure_looped(filepath, loops=200, max_fps=30):
-        """Create a looped copy of the file (concat without re-encode, capped FPS)."""
+    def _ensure_looped(filepath, loops=200):
+        """Create a looped copy of the file (passthrough, no re-encode)."""
         looped_path = filepath.replace(".mp4", "_looped.mp4")
         if os.path.exists(looped_path):
             return looped_path
@@ -75,11 +75,10 @@ class FileFactory(GstRtspServer.RTSPMediaFactory):
         if not shutil.which("ffmpeg"):
             sys.exit("ERROR: ffmpeg not found. Run install-dependencies.sh first.")
 
-        print(f"  Creating looped file: {looped_path} ({loops}x, max {max_fps}fps)...")
+        print(f"  Creating looped file: {looped_path} ({loops}x)...")
         result = subprocess.run(
             ["ffmpeg", "-y", "-stream_loop", str(loops - 1), "-i", filepath,
-             "-vf", f"fps={max_fps}", "-c:v", "libx264", "-preset", "ultrafast",
-             "-crf", "18", "-an", looped_path],
+             "-c", "copy", "-an", looped_path],
             capture_output=True, text=True
         )
         if result.returncode != 0:
