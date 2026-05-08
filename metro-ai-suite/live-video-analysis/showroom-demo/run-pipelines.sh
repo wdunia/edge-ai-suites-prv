@@ -4,11 +4,11 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f1",
-    "prompt": "You are a security guard with 2 images. Infer if an incident is occuring. Describe and give brief reason with less than 20 words",
+    "prompt": "You are a traffic monitor viewing an intersection from above. Is any car driving south-east? If yes, answer: South-east detected. If no, answer: No south-east movement.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Video1",
+    "runName": "Intersection-aerial",
     "frameRate": 1,
     "chunkSize": 2
   }' \
@@ -24,7 +24,7 @@ curl --noproxy localhost -X POST \
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Video2",
+    "runName": "Destroyed-city",
     "frameRate": 1,
     "chunkSize": 2
   }' \
@@ -36,11 +36,11 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f3",
-    "prompt": "You are a security guard with 2 images. Infer if an incident is occuring. Describe with less than 20 words",
+    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Video3",
+    "runName": "Intersection-cyclist",
     "frameRate": 1,
     "chunkSize": 2
   }' \
@@ -52,11 +52,11 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f4",
-    "prompt": "You  are given 2 images, Infer if a crime is in action. Describe and give reason in  less than 10 words",
+    "prompt": "You are viewing a dashcam feed from a moving car. Is there a traffic accident visible? If yes, answer: Accident detected. If no, answer: No accident visible.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Video4",
+    "runName": "Dashcam-accident",
     "frameRate": 1,
     "chunkSize": 2
   }' \
