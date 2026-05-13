@@ -24,6 +24,7 @@ for f in "$VIDEO_DIR"/*.mp4; do
   ffmpeg -y -i "$f" \
     -c:v libx264 -preset fast -crf 23 \
     -r "$FPS" -g "$GOP" -keyint_min "$GOP" \
+    -force_key_frames "expr:gte(t,n_forced*1)" \
     -an "$tmp"
 
   mv "$f" "${f}.bak"
