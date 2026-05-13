@@ -40,11 +40,11 @@ class CameraFactory2(GstRtspServer.RTSPMediaFactory):
 
 class FileFactory(GstRtspServer.RTSPMediaFactory):
     """Streams a pre-looped MP4 file as H.264 RTSP (passthrough, no re-encode)."""
-    def __init__(self, filepath):
+    def __init__(self, filepath, use_loop=True):
         super().__init__()
-        looped = self._ensure_looped(filepath)
+        source = self._ensure_looped(filepath) if use_loop else filepath
         self.set_launch(
-            f"( filesrc location={looped} ! qtdemux ! h264parse config-interval=1 ! "
+            f"( filesrc location={source} ! qtdemux ! h264parse config-interval=1 ! "
             "rtph264pay name=pay0 pt=96 )"
         )
         self.set_shared(True)
@@ -95,13 +95,17 @@ mounts.add_factory("/c1", CameraFactory2('/dev/video0'))
 mounts.add_factory("/c2", CameraFactory2('/dev/video2'))
 
 # Stream local MP4 files from a directory (pass path as first argument)
+# Use --no-loop to skip creating looped copies (relies on GStreamer EOS seek only)
+use_loop = "--no-loop" not in sys.argv
+args = [a for a in sys.argv[1:] if a != "--no-loop"]
+
 file_streams = []
-if len(sys.argv) > 1:
-    video_dir = sys.argv[1]
+if args:
+    video_dir = args[0]
     mp4_files = sorted(f for f in glob.glob(os.path.join(video_dir, "*.mp4")) if not f.endswith("_looped.mp4"))
     for i, filepath in enumerate(mp4_files, start=1):
         endpoint = f"/f{i}"
-        mounts.add_factory(endpoint, FileFactory(filepath))
+        mounts.add_factory(endpoint, FileFactory(filepath, use_loop=use_loop))
         file_streams.append((endpoint, filepath))
 
 server.attach(None)
@@ -114,8 +118,8 @@ for endpoint, filepath in file_streams:
 print()
 print("  Docker: use rtsp://host.docker.internal:8555/...")
 if not file_streams:
-    if len(sys.argv) > 1:
-        print(f"  (No *.mp4 files found in {video_dir})")
+    if args:
+        print(f"  (No *.mp4 files found in {args[0]})")
     else:
         print("  (No MP4 directory given — pass a path as argument to stream files)")
 
