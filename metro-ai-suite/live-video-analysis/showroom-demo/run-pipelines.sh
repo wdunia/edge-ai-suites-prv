@@ -3,7 +3,7 @@
 curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
-    "rtspUrl": "rtsp://host.docker.internal:8555/f3",
+    "rtspUrl": "rtsp://host.docker.internal:8555/f1",
     "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Yes. Bicycle detected. If no, answer: No bicycle visible.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
@@ -19,7 +19,7 @@ sleep 5
 curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
-    "rtspUrl": "rtsp://host.docker.internal:8555/f4",
+    "rtspUrl": "rtsp://host.docker.internal:8555/f2",
     "prompt": "You are a security guard. Infer if an incident is occuring. Describe and give brief reason with less than 20 words",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
@@ -35,7 +35,7 @@ sleep 5
 curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
-    "rtspUrl": "rtsp://host.docker.internal:8555/f1",
+    "rtspUrl": "rtsp://host.docker.internal:8555/f3",
     "prompt": "You are a security guard watching a pedestrian tunnel. Is there any dangerous situation? If yes, answer: Danger detected. If no, answer: No danger detected.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
@@ -51,7 +51,7 @@ sleep 5
 curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
-    "rtspUrl": "rtsp://host.docker.internal:8555/f2",
+    "rtspUrl": "rtsp://host.docker.internal:8555/f4",
     "prompt": "You are a security guard. Infer if a crime is occuring. Describe and give brief reason with less than 20 words",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
