@@ -4,13 +4,13 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f1",
-    "prompt": "You are a safety monitor watching a train station platform. Is anything dangerous happening? If yes, answer: Danger detected. If no, answer: No danger detected.",
+    "prompt": "You are a traffic monitor viewing an intersection from above. Is any car driving south-east? If yes, answer: South-east detected. If no, answer: No south-east movement.",
     "modelName": "InternVL2-1B",
-    "maxNewTokens": 10,
+    "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Station-platform",
+    "runName": "Intersection-aerial",
     "frameRate": 1,
-    "chunkSize": 2
+    "chunkSize": 1
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -20,13 +20,13 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f2",
-    "prompt": "You are a security monitor watching a pedestrian tunnel. Is there any dangerous situation? If yes, answer: Danger detected. If no, answer: No danger detected.",
+    "prompt": "You are a security guard. Infer if an incident is occuring. Describe and give brief reason with less than 20 words",
     "modelName": "InternVL2-1B",
-    "maxNewTokens": 10,
+    "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Pedestrian-tunnel",
+    "runName": "Destroyed-city",
     "frameRate": 1,
-    "chunkSize": 2
+    "chunkSize": 1
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -36,11 +36,11 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f3",
-    "prompt": "You are a fire safety monitor watching a computer room. Is there any fire hazard visible? If yes, answer: Fire hazard detected. If no, answer: No fire hazard.",
+    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
     "modelName": "InternVL2-1B",
-    "maxNewTokens": 10,
+    "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Computer-room-fire",
+    "runName": "Intersection-cyclist",
     "frameRate": 1,
     "chunkSize": 2
   }' \
@@ -52,14 +52,16 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f4",
-    "prompt": "You are a safety monitor watching a car repair workshop. Is there any danger visible? If yes, answer: Danger detected. If no, answer: No danger detected.",
+    "prompt": "You are viewing a dashcam feed from a moving car. Is there a traffic accident visible? If yes, answer: Accident detected. If no, answer: No accident visible.",
     "modelName": "InternVL2-1B",
-    "maxNewTokens": 10,
+    "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Workshop-safety",
+    "runName": "Dashcam-accident",
     "frameRate": 1,
-    "chunkSize": 2
+    "chunkSize": 1
   }' \
   http://localhost:4173/api/generate_captions_alerts
+
+python3 camera-rtsp.py ./videos1
 
 exit

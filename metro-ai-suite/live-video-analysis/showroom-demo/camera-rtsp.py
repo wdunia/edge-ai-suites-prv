@@ -66,7 +66,7 @@ class FileFactory(GstRtspServer.RTSPMediaFactory):
         bus.connect("message::eos", on_eos)
 
     @staticmethod
-    def _ensure_looped(filepath, loops=200):
+    def _ensure_looped(filepath, loops=500):
         """Create a looped copy of the file (passthrough, no re-encode)."""
         looped_path = filepath.replace(".mp4", "_looped.mp4")
         if os.path.exists(looped_path):

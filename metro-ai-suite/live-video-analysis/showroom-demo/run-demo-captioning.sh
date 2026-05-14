@@ -43,4 +43,4 @@ sleep 3
 xdg-open "$APP_URL" &
 
 cd "$SCRIPT_DIR"
-python3 camera-rtsp.py ./videos
+#python3 camera-rtsp.py ./videos
