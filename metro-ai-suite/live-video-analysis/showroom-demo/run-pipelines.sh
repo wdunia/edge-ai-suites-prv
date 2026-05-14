@@ -4,9 +4,9 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f1",
-    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
+    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or motorcycle moving? If yes, answer: Two-wheeler in motion. If no, answer: No two-wheeler moving.",
     "modelName": "InternVL2-1B",
-    "maxNewTokens": 20,
+    "maxNewTokens": 10,
     "pipelineName": "GenAI_Pipeline_on_GPU",
     "runName": "Intersection-cyclist",
     "frameRate": 1,
@@ -36,7 +36,7 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f3",
-    "prompt": "You are a security guard watching a pedestrian tunnel. Is there any dangerous situation? If yes, answer: Yes. Danger detected. If no, answer: No danger detected.",
+    "prompt": "You are a security guard watching a pedestrian tunnel. Is there any dangerous situation? If yes, answer: Yes. Danger detected. If no, answer: No danger detected. Describe and give reason in less than 10 words.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
@@ -52,13 +52,13 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f4",
-    "prompt": "You are a security guard. Infer if a crime is occuring. Describe and give brief reason with less than 20 words.",
+    "prompt": "You are given 2 images, Infer if a crime is in action. Describe and give reason in less than 15 words.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
     "runName": "Monitored-public-space",
     "frameRate": 1,
-    "chunkSize": 1
+    "chunkSize": 2
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
