@@ -20,7 +20,7 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f2",
-    "prompt": "You are a security guard. Infer if an incident is occuring. Describe and give brief reason with less than 20 words.",
+    "prompt": "You are a security guard. Infer if an incident is occurring. Describe and give brief reason with less than 20 words.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
