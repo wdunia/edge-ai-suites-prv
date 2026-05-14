@@ -4,13 +4,15 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f1",
-    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Yes. Bicycle detected. If no, answer: No bicycle visible.",
+    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
     "runName": "Intersection-cyclist",
     "frameRate": 1,
-    "chunkSize": 1
+    "chunkSize": 1,
+    "FrameWidth": 448,
+    "FrameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -20,13 +22,15 @@ curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f2",
-    "prompt": "You are a security guard. Infer if an incident is occurring. Describe and give brief reason with less than 20 words.",
+    "prompt": "You are viewing a dashcam feed from a moving car. Is there a traffic accident visible? If yes, answer: Accident detected. If no, answer: No accident visible.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
     "runName": "Dashcam-accident",
     "frameRate": 1,
-    "chunkSize": 1
+    "chunkSize": 1,
+    "FrameWidth": 448,
+    "FrameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -42,7 +46,9 @@ curl --noproxy localhost -X POST \
     "pipelineName": "GenAI_Pipeline_on_GPU",
     "runName": "Monitored-tunnel",
     "frameRate": 1,
-    "chunkSize": 1
+    "chunkSize": 1,
+    "FrameWidth": 448,
+    "FrameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -58,7 +64,9 @@ curl --noproxy localhost -X POST \
     "pipelineName": "GenAI_Pipeline_on_GPU",
     "runName": "Monitored-public-space",
     "frameRate": 1,
-    "chunkSize": 1
+    "chunkSize": 1,
+    "FrameWidth": 448,
+    "FrameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
