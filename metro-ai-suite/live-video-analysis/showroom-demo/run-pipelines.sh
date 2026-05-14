@@ -11,8 +11,8 @@ curl --noproxy localhost -X POST \
     "runName": "Intersection-cyclist",
     "frameRate": 1,
     "chunkSize": 1,
-    "FrameWidth": 448,
-    "FrameHeight": 448
+    "frameWidth": 448,
+    "frameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -29,8 +29,8 @@ curl --noproxy localhost -X POST \
     "runName": "Dashcam-accident",
     "frameRate": 1,
     "chunkSize": 1,
-    "FrameWidth": 448,
-    "FrameHeight": 448
+    "frameWidth": 448,
+    "frameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -47,8 +47,8 @@ curl --noproxy localhost -X POST \
     "runName": "Monitored-tunnel",
     "frameRate": 1,
     "chunkSize": 1,
-    "FrameWidth": 448,
-    "FrameHeight": 448
+    "frameWidth": 448,
+    "frameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
@@ -65,8 +65,8 @@ curl --noproxy localhost -X POST \
     "runName": "Monitored-public-space",
     "frameRate": 1,
     "chunkSize": 1,
-    "FrameWidth": 448,
-    "FrameHeight": 448
+    "frameWidth": 448,
+    "frameHeight": 448
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
