@@ -3,70 +3,62 @@
 curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
-    "rtspUrl": "rtsp://host.docker.internal:8555/f1",
-    "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
-    "modelName": "InternVL2-1B",
-    "maxNewTokens": 20,
-    "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Intersection-cyclist",
-    "frameRate": 1,
-    "chunkSize": 1,
-    "frameWidth": 448,
-    "frameHeight": 448
-  }' \
-  http://localhost:4173/api/generate_captions_alerts
-
-sleep 5
-
-curl --noproxy localhost -X POST \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rtspUrl": "rtsp://host.docker.internal:8555/f2",
-    "prompt": "You are viewing a dashcam feed from a moving car. Is there a traffic accident visible? If yes, answer: Accident detected. If no, answer: No accident visible.",
-    "modelName": "InternVL2-1B",
-    "maxNewTokens": 20,
-    "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Dashcam-accident",
-    "frameRate": 1,
-    "chunkSize": 1,
-    "frameWidth": 448,
-    "frameHeight": 448
-  }' \
-  http://localhost:4173/api/generate_captions_alerts
-
-sleep 5
-
-curl --noproxy localhost -X POST \
-  -H "Content-Type: application/json" \
-  -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f3",
-    "prompt": "You are a security guard watching a pedestrian tunnel. Is there any dangerous situation? If yes, answer: Yes. Danger detected. If no, answer: No danger detected.",
+    "prompt": "Is there a car accident visible? Describe in less than 15 words.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Monitored-tunnel",
+    "runName": "Dashcam-accident1",
     "frameRate": 1,
-    "chunkSize": 1,
-    "frameWidth": 448,
-    "frameHeight": 448
+    "chunkSize": 1
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
-sleep 5
+sleep 15
 
 curl --noproxy localhost -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "rtspUrl": "rtsp://host.docker.internal:8555/f4",
-    "prompt": "Infer if a crime is in action. Describe and give reason in less than 15 words.",
+    "prompt": "Is there a car accident visible? Describe in less than 15 words.",
     "modelName": "InternVL2-1B",
     "maxNewTokens": 20,
     "pipelineName": "GenAI_Pipeline_on_GPU",
-    "runName": "Monitored-public-space",
+    "runName": "Dashcam-accident2",
     "frameRate": 1,
-    "chunkSize": 1,
-    "frameWidth": 448,
-    "frameHeight": 448
+    "chunkSize": 1
+  }' \
+  http://localhost:4173/api/generate_captions_alerts
+
+sleep 15
+
+curl --noproxy localhost -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rtspUrl": "rtsp://host.docker.internal:8555/f2",
+    "prompt": "Is there a cyclist and where is it? Describe in less than 15 words.",
+    "modelName": "InternVL2-1B",
+    "maxNewTokens": 20,
+    "pipelineName": "GenAI_Pipeline_on_GPU",
+    "runName": "Intersection-cyclist",
+    "frameRate": 1,
+    "chunkSize": 1
+  }' \
+  http://localhost:4173/api/generate_captions_alerts
+
+sleep 15
+
+curl --noproxy localhost -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rtspUrl": "rtsp://host.docker.internal:8555/f1",
+    "prompt": "Create a headline for a TV news story that describes what happened and draws on random elements of the scene to convey a sense of hope.",
+    "modelName": "InternVL2-1B",
+    "maxNewTokens": 30,
+    "pipelineName": "GenAI_Pipeline_on_CPU",
+    "runName": "News-headline",
+    "frameRate": 1,
+    "chunkSize": 1
   }' \
   http://localhost:4173/api/generate_captions_alerts
 
