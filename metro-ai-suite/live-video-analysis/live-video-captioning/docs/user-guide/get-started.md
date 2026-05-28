@@ -112,6 +112,8 @@ sudo apt-get install -y gstreamer1.0-rtsp libgstrtspserver-1.0-0 \
     python3-gst-1.0 gir1.2-gstrtspserver-1.0
 ```
 
+> **Note:** On non-Debian-based systems, install the equivalent GStreamer packages using your distribution's package manager (e.g., `dnf`).
+
 ### Stream a USB Camera
 
 ```bash
