@@ -1,0 +1,66 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# RTSP Stream Simulator
+#
+# Simulates RTSP streams from local MP4 files or a USB camera using Docker.
+# Configuration is read from rtsp.env.
+#
+# Usage:
+#   # Stream a USB camera:
+#   docker compose -f docker-compose.rtsp.yaml --profile camera up -d
+#
+#   # Stream a local MP4 file (set RTSP_INPUT in rtsp.env first):
+#   docker compose -f docker-compose.rtsp.yaml --profile file up -d
+#
+#   # Stop:
+#   docker compose -f docker-compose.rtsp.yaml down
+#
+# Streams are available at:
+#   rtsp://host.docker.internal:8554/stream  (file)
+#   rtsp://host.docker.internal:8554/camera  (camera)
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.12.2
+    ports:
+      - "${RTSP_PORT:-8554}:8554"
+    environment:
+      - MTX_PROTOCOLS=tcp
+    restart: unless-stopped
+    env_file:
+      - rtsp.env
+
+  ffmpeg-file:
+    image: linuxserver/ffmpeg:7.1.1
+    profiles:
+      - file
+    depends_on:
+      - mediamtx
+    volumes:
+      - ${RTSP_INPUT:-./sample.mp4}:/video.mp4:ro
+    entrypoint: >
+      ffmpeg -re -stream_loop -1 -i /video.mp4
+      -c copy -an -f rtsp rtsp://mediamtx:8554/stream
+    restart: unless-stopped
+    env_file:
+      - rtsp.env
+
+  ffmpeg-camera:
+    image: linuxserver/ffmpeg:7.1.1
+    profiles:
+      - camera
+    depends_on:
+      - mediamtx
+    devices:
+      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
+    entrypoint: >
+      ffmpeg -f v4l2
+      -framerate ${CAMERA_FRAMERATE:-30}
+      -video_size ${CAMERA_RESOLUTION:-1280x720}
+      -i ${CAMERA_DEVICE:-/dev/video0}
+      -c:v libx264 -preset ultrafast -tune zerolatency
+      -f rtsp rtsp://mediamtx:8554/camera
+    restart: unless-stopped
+    env_file:
+      - rtsp.env
