@@ -14,6 +14,7 @@ This section shows how to:
 - Install Docker platform: [Installation Guide](https://docs.docker.com/get-docker/).
 - Install Docker Compose tool: [Installation Guide](https://docs.docker.com/compose/install/).
 - RTSP stream source (live camera or test feed) or simulated RTSP stream source using local video files.
+  See [Simulated RTSP Stream](#simulated-rtsp-stream) below for instructions on using the bundled RTSP server script.
 - OpenVINO toolkit-compatible VLM in `ov_models/`. See [Model Preparation](./get-started/model-preparation.md) to prepare the model.
 - OpenVINO-compatible Object Detection Models in `ov_detection_models/`. This is only required
 when object detection in the pipeline is enabled. See [Object Detection Pipeline configuration](./how-to-guides/configure-object-detection-pipeline.md) to enable.
@@ -97,6 +98,39 @@ when object detection in the pipeline is enabled. See [Object Detection Pipeline
    ```bash
    docker compose down
    ```
+
+## Simulated RTSP Stream
+
+If you do not have a dedicated RTSP camera, use the bundled helper script to serve a USB camera or local MP4 files as an RTSP source.
+
+### Install Dependencies
+
+```bash
+sudo apt-get install -y gstreamer1.0-rtsp libgstrtspserver-1.0-0 \
+    gstreamer1.0-plugins-ugly gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-base \
+    python3-gst-1.0 gir1.2-gstrtspserver-1.0
+```
+
+### Stream a USB Camera
+
+```bash
+python3 scripts/rtsp_server.py --camera /dev/video0
+```
+
+The stream will be available at `rtsp://host.docker.internal:8554/camera`.
+
+### Stream Local MP4 Files
+
+```bash
+python3 scripts/rtsp_server.py --file /path/to/video.mp4
+# or stream all MP4 files from a directory:
+python3 scripts/rtsp_server.py --dir /path/to/videos/
+```
+
+Files are mounted as `rtsp://host.docker.internal:8554/video1`, `/video2`, etc.
+
+> **Note:** The application runs inside Docker containers, so use `host.docker.internal` to reach the RTSP server running on the host machine.
 
 ## Additional Features Reference
 
