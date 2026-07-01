@@ -68,7 +68,7 @@ Run the following script to start the OVMS container in the background:
 ./setup-ovms.sh
 ```
 
-> **Note:** The first run downloads the model (~5GB). The model will be ready by the time you reach Step 4.
+> **Note:** The first run downloads the model (~5GB), so this step may take a few minutes.
 
 ---
 
@@ -88,18 +88,32 @@ openclaw skills update
 
 ### Step 4: Run OpenClaw agent
 
-Wait for OVMS to finish loading the model, then start the agent:
+Start the agent. This waits for the model to finish loading, then opens the chat:
 
 ``` bash
-until curl -s http://localhost:8000/v3/models | grep -q "Qwen3-8B-int4-ov"; do echo "Waiting for OVMS to load the model..."; sleep 5; done
-openclaw chat
+./run-agent.sh
 ```
+
+If the model isn't ready in time, the script stops with clear next steps on screen (see `Troubleshooting`).
 
 Try this example prompt to verify the agent works:
 
 ```
 Summarize the lesson from June 15
 ```
+
+---
+
+## 🛠️ Troubleshooting
+
+If OVMS model download stops with an HTTP/2 stream error, first check logs to identify the cause, then rerun setup:
+
+``` bash
+docker logs --tail 200 teacher-assistant-ovms
+./setup-ovms.sh
+```
+
+Then rerun Step 4.
 
 ---
 
