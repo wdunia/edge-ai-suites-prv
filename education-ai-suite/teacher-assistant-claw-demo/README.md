@@ -2,6 +2,8 @@
 
 The OpenClaw-based agent functions as the "Teacher Assistant" persona that enables teachers and school staff to query and generate custom reports from classroom session data. This guide sets up a **local, standalone demo** using sample session data and OVMS for on-device inference.
 
+> **Data note:** This demo uses sample input data from `workspace/smart_classroom_incoming`. You can add your own data to `~/.openclaw/workspace/smart_classroom_incoming` for custom analysis.
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                  Teacher Assistant Demo                 │
