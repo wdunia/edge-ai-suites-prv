@@ -100,11 +100,19 @@ warning.
 | `ENABLE_DETECTION_PIPELINE` | `false` | Object detection stays off in this demo |
 | `CAPTION_HISTORY` | `3` | Number of previous captions shown |
 | `WEBRTC_BITRATE` | `2048` | WebRTC bitrate in kbps |
+| `VLM_CACHE_SIZE` | `4` | KV-cache size per run. Each run loads its own VLM instance — the pipelines do not share the model — so lower it only if the concurrent streams stop fitting into GPU memory. |
 
 **`pipelines.json`** — the four demo runs. Top-level keys apply to all runs:
-`vlmDevice` (`gpu`), `pipelineType` (`non-detection`), `cameraDevice`.
-Each run defines `runName`, `source` (`camera` or `file`), `prompt`,
-`maxNewTokens`, `frameRate` and `chunkSize`.
+`vlmDevice` (`gpu`), `pipelineType` (`non-detection`), `cameraDevice`, plus the
+shared run defaults `frameWidth`, `frameHeight`, `maxNewTokens`, `frameRate` and
+`chunkSize`. Every run defines `runName`, `source` (`camera` or `file`) and
+`prompt`, and may override any default.
+
+> **Latency tuning:** frame resolution drives **TTFT** (image tokens grow with
+> area) and `maxNewTokens` drives the **caption lag** (decode time per token).
+> A run left at the source resolution — for example a 720p webcam — can be
+> several times slower than one capped at 640×480, so keep all runs on the same
+> budget unless you deliberately want one high-resolution stream.
 
 **Script overrides** (environment variables):
 
@@ -124,6 +132,7 @@ VLM_MODEL=OpenGVLab/InternVL2-2B ./run-demo-captioning.sh
 | `Run ... was not ready in 300s` for the file runs | The pipeline server cannot pull `rtsp://<HOST_IP>:8554/streamN`. Add the host IP (and your local ranges) to `no_proxy` in `/etc/environment`, then `source /etc/environment` and restart the demo. See [known issues](../live-video-captioning/docs/user-guide/known-issues.md#rtsp-stream-not-reachable-from-live-video-captioning-application). |
 | `Pipeline server unreachable ... Temporary failure in name resolution` | `dlstreamer-pipeline-server` exited, so Docker DNS cannot resolve it. Inspect `docker logs dlstreamer-pipeline-server` — usually resource pressure from too many concurrent GPU streams or a proxy-related segfault. Reduce the number of runs in `pipelines.json` or lower `frameWidth`/`frameHeight`. |
 | Only some runs start | Concurrent GPU capacity is limited; scale gradually (start with camera + 1 file run) and check `docker stats` / the dashboard metrics. |
+| One run has much higher TTFT/lag than the others | It is running at a higher frame resolution or with more `maxNewTokens`. Align `frameWidth`/`frameHeight`/`maxNewTokens` in `pipelines.json` — the camera defaults to the source resolution when they are omitted. |
 | `No VLM model available for device 'gpu'` | Rerun the demo; it converts the model, or run `../live-video-captioning/model_download_scripts/download_models.sh --model OpenGVLab/InternVL2-1B --type vlm --weight-format int8 --device GPU` |
 | Camera run is skipped | `/dev/video0` missing — check `ls /dev/video*` and `cameraDevice` in `pipelines.json` |
 | File runs are skipped | No `*.mp4` files in `videos/` |

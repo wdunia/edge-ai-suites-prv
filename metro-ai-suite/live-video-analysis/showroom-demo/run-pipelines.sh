@@ -71,6 +71,17 @@ VLM_DEVICE="$(jq -r '.vlmDevice // "gpu"' "${CONFIG_FILE}" | tr '[:upper:]' '[:l
 PIPELINE_TYPE="$(jq -r '.pipelineType // "non-detection"' "${CONFIG_FILE}")"
 CAMERA_DEVICE="$(jq -r '.cameraDevice // "/dev/video0"' "${CONFIG_FILE}")"
 
+# Top-level values act as defaults for every run; a run may override any of them.
+# Frame resolution is the dominant factor for TTFT (image tokens grow with area),
+# and maxNewTokens dominates the caption lag, so keep both consistent across runs.
+RUN_DEFAULTS="$(jq -c '{
+  frameWidth: .frameWidth,
+  frameHeight: .frameHeight,
+  maxNewTokens: (.maxNewTokens // 20),
+  frameRate: (.frameRate // 1),
+  chunkSize: (.chunkSize // 1)
+}' "${CONFIG_FILE}")"
+
 PUBLISHED_STREAMS=0
 
 # ------------------------------------------------------------- RTSP publisher
@@ -209,21 +220,23 @@ start_run() {
     --arg pipelineType "${PIPELINE_TYPE}" \
     --arg model "${model}" \
     --arg device "${VLM_DEVICE}" \
+    --argjson defaults "${RUN_DEFAULTS}" \
     --argjson run "${run_json}" \
-    '{
-       rtspUrl: $url,
-       streamSourceType: $sourceType,
-       pipelineType: $pipelineType,
-       modelName: $model,
-       vlmDevice: $device,
-       prompt: $run.prompt,
-       runName: $run.runName,
-       maxNewTokens: ($run.maxNewTokens // 20),
-       frameRate: ($run.frameRate // 1),
-       chunkSize: ($run.chunkSize // 1)
-     }
-     + (if $run.frameWidth then {frameWidth: $run.frameWidth} else {} end)
-     + (if $run.frameHeight then {frameHeight: $run.frameHeight} else {} end)')"
+    '($defaults + ($run | with_entries(select(.value != null)))) as $cfg
+     | {
+         rtspUrl: $url,
+         streamSourceType: $sourceType,
+         pipelineType: $pipelineType,
+         modelName: $model,
+         vlmDevice: $device,
+         prompt: $cfg.prompt,
+         runName: $cfg.runName,
+         maxNewTokens: $cfg.maxNewTokens,
+         frameRate: $cfg.frameRate,
+         chunkSize: $cfg.chunkSize
+       }
+       + (if $cfg.frameWidth then {frameWidth: $cfg.frameWidth} else {} end)
+       + (if $cfg.frameHeight then {frameHeight: $cfg.frameHeight} else {} end)')"
 
   if ! pipeline_server_alive; then
     die "Container '${PIPELINE_SERVER_CONTAINER}' is not running - it exited before run '${run_name}'.
@@ -243,7 +256,23 @@ or a missing no_proxy entry for ${HOST_IP} (see live-video-captioning/docs/user-
     warn "Backend rejected run '${run_name}': ${response}"
     return 0
   fi
+
+  # Report what the backend actually applied. A run without frameWidth/frameHeight
+  # is served by a *_Default_Resolution pipeline and keeps the source resolution,
+  # which multiplies the image tokens and therefore the TTFT.
+  log "  applied: $(jq -r '"pipeline=\(.pipelineName) resolution=\(.frameWidth // "source")x\(.frameHeight // "source") maxTokens=\(.maxTokens) frameRate=\(.frameRate) chunkSize=\(.chunkSize)"' <<<"${response}" 2>/dev/null || echo "${response}")"
+
   wait_stream_ready "${run_id}" || true
+}
+
+print_summary() {
+  local runs
+  runs="$("${CURL[@]}" -m 10 "${API}/generate_captions_alerts" 2>/dev/null || true)"
+  [[ -n "${runs}" ]] || return 0
+  log "Active runs:"
+  jq -r '(if type == "array" then . else (.runs // []) end)[]
+         | "  \(.runName // .runId): \(.pipelineName) \(.frameWidth // "source")x\(.frameHeight // "source") maxTokens=\(.maxTokens) status=\(.status)"' \
+    <<<"${runs}" 2>/dev/null || true
 }
 
 # ------------------------------------------------------------------ main flow
@@ -267,5 +296,6 @@ while IFS= read -r run_json; do
   fi
 done < <(jq -c '.runs[]' "${CONFIG_FILE}")
 
+print_summary
 log "All configured runs have been started."
 
