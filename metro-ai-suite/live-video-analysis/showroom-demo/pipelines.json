@@ -2,17 +2,10 @@
   "vlmDevice": "gpu",
   "pipelineType": "non-detection",
   "cameraDevice": "/dev/video0",
-  "frameWidth": 640,
-  "frameHeight": 480,
   "maxNewTokens": 20,
   "frameRate": 1,
   "chunkSize": 1,
   "runs": [
-    {
-      "runName": "USB-Camera",
-      "source": "camera",
-      "prompt": "Is there a fire visible? Describe in less than 12 words."
-    },
     {
       "runName": "Intersection",
       "source": "file",
@@ -27,6 +20,12 @@
       "runName": "Dashcam2",
       "source": "file",
       "prompt": "Is there a car accident visible? Describe in less than 15 words."
+    },
+    {
+      "runName": "USB-Camera",
+      "source": "camera",
+      "prompt": "Is there a fire visible? Describe in less than 10 words.",
+      "maxNewTokens": 10
     }
   ]
 }
