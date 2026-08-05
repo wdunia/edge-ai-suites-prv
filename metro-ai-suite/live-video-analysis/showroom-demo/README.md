@@ -121,6 +121,9 @@ VLM_MODEL=OpenGVLab/InternVL2-2B ./run-demo-captioning.sh
 
 | Symptom | Fix |
 |---------|-----|
+| `Run ... was not ready in 300s` for the file runs | The pipeline server cannot pull `rtsp://<HOST_IP>:8554/streamN`. Add the host IP (and your local ranges) to `no_proxy` in `/etc/environment`, then `source /etc/environment` and restart the demo. See [known issues](../live-video-captioning/docs/user-guide/known-issues.md#rtsp-stream-not-reachable-from-live-video-captioning-application). |
+| `Pipeline server unreachable ... Temporary failure in name resolution` | `dlstreamer-pipeline-server` exited, so Docker DNS cannot resolve it. Inspect `docker logs dlstreamer-pipeline-server` — usually resource pressure from too many concurrent GPU streams or a proxy-related segfault. Reduce the number of runs in `pipelines.json` or lower `frameWidth`/`frameHeight`. |
+| Only some runs start | Concurrent GPU capacity is limited; scale gradually (start with camera + 1 file run) and check `docker stats` / the dashboard metrics. |
 | `No VLM model available for device 'gpu'` | Rerun the demo; it converts the model, or run `../live-video-captioning/model_download_scripts/download_models.sh --model OpenGVLab/InternVL2-1B --type vlm --weight-format int8 --device GPU` |
 | Camera run is skipped | `/dev/video0` missing — check `ls /dev/video*` and `cameraDevice` in `pipelines.json` |
 | File runs are skipped | No `*.mp4` files in `videos/` |

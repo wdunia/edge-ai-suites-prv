@@ -17,7 +17,9 @@
       "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
       "maxNewTokens": 20,
       "frameRate": 1,
-      "chunkSize": 1
+      "chunkSize": 1,
+      "frameWidth": 640,
+      "frameHeight": 480
     },
     {
       "runName": "Dashcam",
@@ -25,7 +27,9 @@
       "prompt": "You are viewing a dashcam feed from a moving car. Is there a traffic accident visible? If yes, answer: Accident detected. If no, answer: No accident visible.",
       "maxNewTokens": 20,
       "frameRate": 1,
-      "chunkSize": 1
+      "chunkSize": 1,
+      "frameWidth": 640,
+      "frameHeight": 480
     },
     {
       "runName": "Platform",
@@ -33,8 +37,9 @@
       "prompt": "You are a safety monitor watching a public area. Is anything dangerous happening? If yes, answer: Danger detected. If no, answer: No danger detected.",
       "maxNewTokens": 20,
       "frameRate": 1,
-      "chunkSize": 1
+      "chunkSize": 1,
+      "frameWidth": 640,
+      "frameHeight": 480
     }
   ]
 }
-

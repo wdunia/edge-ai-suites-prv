@@ -22,6 +22,7 @@ RTSP_PID_FILE="${SCRIPT_DIR}/.rtsp-publisher.pid"
 RTSP_LOG_FILE="${SCRIPT_DIR}/.rtsp-publisher.log"
 RTSP_PORT="8554"
 RTSP_CONTAINER="mediamtx-server"
+PIPELINE_SERVER_CONTAINER="dlstreamer-pipeline-server"
 
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 STREAM_READY_TIMEOUT="${STREAM_READY_TIMEOUT:-300}"
@@ -154,9 +155,20 @@ resolve_model() {
   echo "${model}"
 }
 
+# The DL Streamer pipeline server can exit under resource pressure (see the
+# application's known-issues guide). Once it is gone, every further run fails
+# with a confusing DNS error, so check it explicitly.
+pipeline_server_alive() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "${PIPELINE_SERVER_CONTAINER}" 2>/dev/null)" == "true" ]]
+}
+
 wait_stream_ready() {
   local run_id="$1" waited=0 response
   while (( waited < STREAM_READY_TIMEOUT )); do
+    if ! pipeline_server_alive; then
+      warn "Pipeline server exited while starting '${run_id}'."
+      return 1
+    fi
     response="$("${CURL[@]}" -m 10 "${API}/generate_captions_alerts/${run_id}/stream-ready" 2>/dev/null || true)"
     if [[ "$(jq -r '.error // false' <<<"${response}" 2>/dev/null || echo false)" == "true" ]]; then
       warn "Run '${run_id}' entered an error state. Check: docker logs dlstreamer-pipeline-server"
@@ -209,7 +221,15 @@ start_run() {
        maxNewTokens: ($run.maxNewTokens // 20),
        frameRate: ($run.frameRate // 1),
        chunkSize: ($run.chunkSize // 1)
-     }')"
+     }
+     + (if $run.frameWidth then {frameWidth: $run.frameWidth} else {} end)
+     + (if $run.frameHeight then {frameHeight: $run.frameHeight} else {} end)')"
+
+  if ! pipeline_server_alive; then
+    die "Container '${PIPELINE_SERVER_CONTAINER}' is not running - it exited before run '${run_name}'.
+Check 'docker logs ${PIPELINE_SERVER_CONTAINER}'. Common causes: too many concurrent GPU streams
+or a missing no_proxy entry for ${HOST_IP} (see live-video-captioning/docs/user-guide/known-issues.md)."
+  fi
 
   log "Starting run '${run_name}' on ${source_uri}"
   response="$("${CURL[@]}" -X POST "${API}/generate_captions_alerts" \

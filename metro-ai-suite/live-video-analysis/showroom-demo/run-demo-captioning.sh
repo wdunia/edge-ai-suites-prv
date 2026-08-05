@@ -60,6 +60,14 @@ HOST_IP="${HOST_IP:-127.0.0.1}"
 DASHBOARD_PORT="$(grep -E '^DASHBOARD_PORT=' "${APP_DIR}/.env" | tail -1 | cut -d= -f2-)"
 DASHBOARD_PORT="${DASHBOARD_PORT:-4173}"
 
+# The RTSP streams are served from the host IP. Behind a corporate proxy the
+# pipeline server must bypass the proxy for it, otherwise the stream stalls and
+# DLSPS can crash (see the application's known-issues guide).
+NO_PROXY_BASE="localhost,127.0.0.1,${HOST_IP},host.docker.internal"
+export no_proxy="${NO_PROXY_BASE}${no_proxy:+,${no_proxy}}"
+export NO_PROXY="${NO_PROXY_BASE}${NO_PROXY:+,${NO_PROXY}}"
+log "no_proxy=${no_proxy}"
+
 # 3. Download and convert the VLM once (quick-start step 3, with --device GPU).
 #    The guard keeps the "one-time" behaviour across demo restarts.
 MODEL_DIR="${APP_DIR}/ov_models/$(echo "${VLM_DEVICE}" | tr '[:upper:]' '[:lower:]')/${VLM_MODEL##*/}"
