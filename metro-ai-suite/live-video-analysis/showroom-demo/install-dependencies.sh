@@ -18,7 +18,11 @@ sudo apt install -y \
 	gstreamer1.0-tools \
 	v4l-utils
 
+# jq: used by run-pipelines.sh and by the application's setup_proxy_rtsp.sh
+sudo apt install -y jq curl
+
 # H.264 codec support for Firefox (required for WebRTC video playback)
+# ffmpeg also publishes the looped RTSP demo streams.
 sudo apt install -y ffmpeg
 
 # Docker Engine (skipped if already installed)

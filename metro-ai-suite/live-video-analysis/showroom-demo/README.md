@@ -1,84 +1,117 @@
-# Showroom Demo — Live Video Analysis
+# Showroom Demo — Live Video Captioning
 
-Two demo applications that analyse a live USB camera feed using AI:
+One-command showroom demo for the
+[live-video-captioning](../live-video-captioning) application: it generates
+real-time natural-language captions for four parallel video sources.
 
-| Demo | What it does | URL |
-|------|-------------|-----|
-| **live-video-alert-agent** | Detects events in the video stream and raises alerts | http://localhost:9000 |
-| **live-video-captioning** | Generates real-time natural-language captions of the scene | http://localhost:4173 |
+| Source | Pipeline |
+|--------|----------|
+| USB camera (`/dev/video0`) | `Video_Captioning_Camera_Hardware` (GPU) |
+| 3 local video files | `Video_Captioning_RTSP_Hardware` (GPU), published as looped RTSP streams |
 
-Each demo runs as a set of Docker containers. A local RTSP server (`camera-rtsp.py`) streams
-the USB camera feed into the pipeline.
+Dashboard: `http://<HOST_IP>:4173`
+
+---
+
+## 🚀 Running the demo
+
+```bash
+./run-demo-captioning.sh
+```
+
+The script performs the whole documented application flow:
+
+1. Stops anything left over from a previous session (`stop-all-demos.sh`).
+2. Regenerates `../live-video-captioning/.env` with `scripts/setup_env.sh --force`
+   so `HOST_IP` always matches the current network.
+3. Downloads and converts the VLM for the **GPU** on first run
+   (`OpenGVLab/InternVL2-1B`, `int8`) — this takes several minutes once.
+4. Starts the stack with `docker compose` using `.env` plus the showroom
+   overrides in `captioning-demo.env`.
+5. Publishes `videos/*.mp4` as looped RTSP streams and starts the four runs
+   from `pipelines.json` (`run-pipelines.sh`).
+6. Opens the dashboard in the browser and keeps running.
+
+Press **Ctrl+C** to stop — containers, RTSP streams and the ffmpeg publishers
+are all shut down.
+
+### Relation to the application quick start
+
+The demo automates the [quick start guide](../live-video-captioning/docs/user-guide/quick-start-guide.md)
+with these showroom-specific choices:
+
+| Quick start step | Demo behaviour | Why |
+|------------------|----------------|-----|
+| `bash scripts/setup_env.sh` | `setup_env.sh --force` | The showroom machine changes networks; `HOST_IP` must be re-detected on every start. |
+| `download_models.sh ... --weight-format int8` (CPU default) | same command with `--device GPU`, skipped when `ov_models/gpu/<model>` exists | The demo pins inference to the integrated GPU; the guard keeps it a one-time step. |
+| `docker compose up -d` | `--env-file .env --env-file captioning-demo.env` | Keeps showroom settings in version control instead of hand-editing the regenerated `.env`. |
+| Configure the run in the dashboard | `run-pipelines.sh` posts the runs to the documented REST API | Four sources have to start unattended before the browser opens. |
+| Simulated RTSP stream guide | `scripts/setup_proxy_rtsp.sh` publishes `videos/*.mp4` | Same helper the documentation recommends. |
+
+> Because `.env` is regenerated, put gated-model credentials in the shell, not in
+> the file: `export HUGGINGFACEHUB_API_TOKEN=<token>` before starting the demo —
+> the launcher re-applies it to `.env` after regeneration.
 
 ---
 
 <details>
 <summary>🔧 First-time setup</summary>
 
-**1. Install system dependencies** (GStreamer, V4L2, Python GObject bindings):
+**1. Install system dependencies** (Docker, ffmpeg, jq, V4L2 utilities):
 
 ```bash
 ./install-dependencies.sh
 ```
 
-**2. Connect a USB camera** — a Logitech C920 Pro or any UVC-compliant webcam.
-Plug it in, then verify it is detected:
+**2. Connect a USB camera** — any UVC webcam that provides MJPG/YUYV output.
+Verify it is detected:
 
 ```bash
-ls /dev/video*        # expect /dev/video0 (and /dev/video2 for a second camera)
-./list-camera-formats.sh   # confirm MJPEG 1280x720 @ 15 fps is listed
+ls /dev/video*          # expect /dev/video0
+./list-camera-formats.sh
 ```
 
-If the device node is not `/dev/video0`, update the two `CameraFactory` lines at the bottom
-of `camera-rtsp.py` to match.
+If the device node differs, change `cameraDevice` in `pipelines.json`.
+
+**3. Add three demo videos.** The `videos/` directory is **not** part of the
+repository (it is git-ignored). Copy your own clips into it:
+
+```bash
+mkdir -p videos
+cp /path/to/*.mp4 videos/
+```
+
+Files are matched to the `"source": "file"` entries of `pipelines.json` in
+alphabetical order. With fewer files, the remaining runs are skipped with a
+warning.
 
 </details>
 
 <details>
-<summary>⚙️ One-time setup for live-video-captioning</summary>
+<summary>⚙️ Configuration</summary>
 
-Before running `run-demo-captioning.sh` for the first time, complete the setup steps in the
-application's own guide — specifically **Configure Environment** (`.env` file) and
-**Download/Export Models**:
-
-📄 [`../live-video-captioning/docs/user-guide/get-started.md`](../live-video-captioning/docs/user-guide/get-started.md)
-
-</details>
-
----
-
-## 🚀 Running a demo
-
-```bash
-./run-demo-alert.sh       # launch the alert-agent demo
-# or
-./run-demo-captioning.sh  # launch the captioning demo
-```
-
-The script will:
-1. Stop any other running demo automatically.
-2. Start the Docker containers for the selected application.
-3. Open the app UI in the browser.
-4. Start streaming the camera over RTSP.
-
-Press **Ctrl+C** at any time to stop — containers are shut down automatically.
-
-<details>
-<summary>🔀 Overriding defaults</summary>
-
-Environment variables can be passed inline or set before running:
-
-```bash
-TARGET_DEVICE=CPU ./run-demo-alert.sh
-TAG=1.1.0 ./run-demo-captioning.sh
-```
+**`captioning-demo.env`** — overrides applied on top of the application `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TARGET_DEVICE` | `GPU` | Inference device (`GPU` or `CPU`) |
-| `TAG` | `1.0.0` | Docker image tag |
 | `REGISTRY` | `intel/` | Docker image registry prefix |
-| `RTSP_URL` | *(per script)* | RTSP stream URL passed to the containers |
+| `TAG` | `latest` | Docker image tag |
+| `ALERT_MODE` | `true` | Alert-style highlighting in the dashboard |
+| `ENABLE_DETECTION_PIPELINE` | `false` | Object detection stays off in this demo |
+| `CAPTION_HISTORY` | `3` | Number of previous captions shown |
+| `WEBRTC_BITRATE` | `2048` | WebRTC bitrate in kbps |
+
+**`pipelines.json`** — the four demo runs. Top-level keys apply to all runs:
+`vlmDevice` (`gpu`), `pipelineType` (`non-detection`), `cameraDevice`.
+Each run defines `runName`, `source` (`camera` or `file`), `prompt`,
+`maxNewTokens`, `frameRate` and `chunkSize`.
+
+**Script overrides** (environment variables):
+
+```bash
+VLM_MODEL=OpenGVLab/InternVL2-2B ./run-demo-captioning.sh
+./run-pipelines.sh --config my-pipelines.json --videos /data/clips
+```
 
 </details>
 
@@ -88,53 +121,28 @@ TAG=1.1.0 ./run-demo-captioning.sh
 
 | Symptom | Fix |
 |---------|-----|
-| `No such file or directory: /dev/video0` | Check USB connection; run `dmesg \| tail -20` |
-| Video stream is black or missing | Run `./list-camera-formats.sh` and update device paths in `camera-rtsp.py` |
-| Video panel says "unable to connect" or shows no video in Firefox | H.264 codec missing — see **Firefox H.264 fix** below |
-| Browser does not open automatically | Navigate manually to the URL shown in the terminal |
-| Docker Compose fails to start | Check that images exist: `docker images \| grep live-video` |
+| `No VLM model available for device 'gpu'` | Rerun the demo; it converts the model, or run `../live-video-captioning/model_download_scripts/download_models.sh --model OpenGVLab/InternVL2-1B --type vlm --weight-format int8 --device GPU` |
+| Camera run is skipped | `/dev/video0` missing — check `ls /dev/video*` and `cameraDevice` in `pipelines.json` |
+| File runs are skipped | No `*.mp4` files in `videos/` |
+| RTSP streams do not start | Inspect `.rtsp-publisher.log` and `docker logs mediamtx-server` |
+| Service never becomes healthy | `docker logs video-caption-service` |
+| Pipeline goes to error state | `docker logs dlstreamer-pipeline-server` |
+| Video panel shows nothing in Firefox | H.264 missing — see **Firefox H.264 fix** below |
+| Stream behind a corporate proxy | Add `HOST_IP` to `no_proxy` before starting the demo |
 
 **Firefox H.264 fix** — Firefox on Ubuntu (especially Snap) may lack H.264 support:
 
-1. Run `./install-dependencies.sh` to install `ffmpeg` and codec packages.
-2. Open `about:config` in Firefox and verify:
-   - `media.gmp-gmpopenh264.enabled` → `true`
-   - `media.peerconnection.video.h264_enabled` → `true`
+1. Run `./install-dependencies.sh`.
+2. In `about:config` verify `media.gmp-gmpopenh264.enabled` and
+   `media.peerconnection.video.h264_enabled` are `true`.
 3. Restart Firefox.
 
 ---
 
 ## 📚 Reference
 
-<details>
-<summary>How the RTSP camera server works</summary>
-
-`camera-rtsp.py` captures frames from V4L2 devices and re-encodes them as H.264 over RTP
-using GStreamer, making the feed available both to the host and to Docker containers:
-
-- Host: `rtsp://localhost:8555/c1`, `rtsp://localhost:8555/c2`
-- Inside Docker: `rtsp://host.docker.internal:8555/c1`, `.../c2`
-
-The C920 Pro outputs native MJPEG, which avoids software decoding before re-encoding
-and keeps CPU usage and latency low.
-
-</details>
-
-<details>
-<summary>Adding a new demo</summary>
-
-Register the new project's directory name in the `DEMO_DIRS` list in `stop-all-demos.sh`.
-No changes to any other script are needed.
-
-</details>
-
-<details>
-<summary>Full application documentation</summary>
-
-- 📄 [live-video-alert-agent — Get Started](../live-video-alert-agent/docs/user-guide/get-started.md)
+- 📄 [live-video-captioning — Quick Start](../live-video-captioning/docs/user-guide/quick-start-guide.md)
 - 📄 [live-video-captioning — Get Started](../live-video-captioning/docs/user-guide/get-started.md)
-
-</details>
-
-
+- 📄 [Simulated RTSP streams](../live-video-captioning/docs/user-guide/get-started/simulated-rtsp-stream-guide.md)
+- 📁 [`deprecated/`](./deprecated/README.md) — scripts from the previous showroom flow
 
