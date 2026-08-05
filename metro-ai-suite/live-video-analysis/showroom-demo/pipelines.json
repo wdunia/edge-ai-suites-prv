@@ -6,15 +6,15 @@
     {
       "runName": "USB-Camera",
       "source": "camera",
-      "prompt": "You are a showroom assistant. Describe what the people in front of the camera are doing in less than 15 words.",
-      "maxNewTokens": 30,
+      "prompt": "You are a fire safety monitor watching a room. Is there any fire hazard visible?",
+      "maxNewTokens": 15,
       "frameRate": 1,
       "chunkSize": 1
     },
     {
       "runName": "Intersection",
       "source": "file",
-      "prompt": "You are a traffic monitor viewing an intersection. Is there a bicycle or cyclist visible? If yes, answer: Bicycle detected. If no, answer: No bicycle visible.",
+      "prompt": "Is there a cyclist and where is it? Describe in less than 15 words.",
       "maxNewTokens": 20,
       "frameRate": 1,
       "chunkSize": 1,
@@ -22,9 +22,9 @@
       "frameHeight": 480
     },
     {
-      "runName": "Dashcam",
+      "runName": "Dashcam1",
       "source": "file",
-      "prompt": "You are viewing a dashcam feed from a moving car. Is there a traffic accident visible? If yes, answer: Accident detected. If no, answer: No accident visible.",
+      "prompt": "Is there a car accident visible? Describe in less than 15 words.",
       "maxNewTokens": 20,
       "frameRate": 1,
       "chunkSize": 1,
@@ -32,9 +32,9 @@
       "frameHeight": 480
     },
     {
-      "runName": "Platform",
+      "runName": "Dashcam2",
       "source": "file",
-      "prompt": "You are a safety monitor watching a public area. Is anything dangerous happening? If yes, answer: Danger detected. If no, answer: No danger detected.",
+      "prompt": "Is there a car accident visible? Describe in less than 15 words.",
       "maxNewTokens": 20,
       "frameRate": 1,
       "chunkSize": 1,
