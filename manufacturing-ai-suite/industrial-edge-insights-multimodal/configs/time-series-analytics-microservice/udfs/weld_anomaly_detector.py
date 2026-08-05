@@ -213,6 +213,7 @@ class AnomalyDetectorHandler(Handler):
             point.fieldsDouble["Good Weld"] = 0.0
             point.fieldsDouble["Defective Weld"] = 0.0
             point.fieldsDouble["anomaly_status"] = 0.0
+            point.fieldsDouble["confidence"] = 1.0
             logger.debug(
                 "Primary Weld Current below threshold (%d). Classified as %s.",
                 WELD_CURRENT_THRESHOLD,
@@ -263,6 +264,8 @@ class AnomalyDetectorHandler(Handler):
                         data_prediction,
                     )
 
+                    point.fieldsString["predicted_category"] = predicted_category
+                    point.fieldsDouble["confidence"] = confidence
                     point.fieldsString["prediction_details"] = json.dumps(data_prediction)
 
                     if bad_defect > 50:

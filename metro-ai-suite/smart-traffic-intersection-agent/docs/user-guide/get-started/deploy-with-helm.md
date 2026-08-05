@@ -1,4 +1,4 @@
-# How to Deploy with Helm
+# Deploy with Helm
 
 This guide provides step-by-step instructions for deploying the Smart Traffic Intersection Agent application using Helm.
 
@@ -10,8 +10,8 @@ Before you begin, ensure that you have the following prerequisites:
 - The cluster must support **dynamic provisioning of Persistent Volumes (PV)**. Refer to the [Kubernetes Dynamic Provisioning Guide](https://kubernetes.io/docs/concepts/storage/dynamic-provisioning/) for more details.
 - Install `kubectl` on your system. Refer to the [Installation Guide](https://kubernetes.io/docs/tasks/tools/install-kubectl/). Ensure access to the Kubernetes cluster.
 - Helm installed on your system: [Installation Guide](https://helm.sh/docs/intro/install/).
-- A running **Smart Intersection** deployment (provides MQTT broker, camera pipelines, and scene analytics). See [Step 4](#step-4-deploy-smart-intersection) below.
-- The SceneScape CA certificate file (`scenescape-ca.pem`) for TLS connections to the MQTT broker (created during the Smart Intersection installation).
+- A running **Smart Intersection** deployment (provides MQTT broker, camera pipelines, and scene analytics). See [Step 4](#step-5-deploy-smart-intersection) below.
+- The Scenescape CA certificate file (`scenescape-ca.pem`) for TLS connections to the MQTT broker (created during the Smart Intersection installation).
 - *(Optional)* A [Hugging Face](https://huggingface.co/) API token if the VLM model requires authentication.
 - **Storage Requirement:** The VLM model cache PVC requests 20 GiB by default. Ensure the cluster has sufficient storage available.
 - *(Optional — GPU inference)* To run VLM inference on an Intel GPU:
@@ -37,6 +37,8 @@ Use the following command to pull the Helm chart:
 ```bash
 helm pull oci://registry-1.docker.io/intel/smart-traffic-intersection-agent --version <version-no>
 ```
+
+Refer to release notes for details on the latest version to use.
 
 #### Step 2: Extract the `.tgz` File
 
@@ -66,7 +68,7 @@ Clone the repository containing the Helm chart:
 
 ```bash
 # Clone the latest on mainline
-git clone https://github.com/open-edge-platform/edge-ai-suites.git
+git clone https://github.com/open-edge-platform/edge-ai-suites.git -b main
 # Alternatively, clone a specific release branch
 git clone https://github.com/open-edge-platform/edge-ai-suites.git -b <release-tag>
 ```
@@ -79,7 +81,25 @@ Navigate to the chart directory:
 cd edge-ai-suites/metro-ai-suite/smart-traffic-intersection-agent/chart
 ```
 
-#### Step 3: Configure the `values.yaml` File
+#### Step 3: Build Chart Dependencies
+
+The OVMS and Metrics Manager components are packaged as local subcharts under `subcharts/`.
+Since the generated dependency archives in `charts/` are not committed to the repository, build
+them from source before installing:
+
+```bash
+helm dependency build .
+```
+
+This downloads/packages the `ovms` and `metrics-manager` subcharts into `chart/charts/*.tgz`,
+which Helm requires at render/install time. Re-run this command whenever the subchart sources
+under `subcharts/` change.
+
+```bash
+helm lint .
+```
+
+#### Step 4: Configure the `values.yaml` File
 
 Edit the `values.yaml` file located in the chart directory to set the necessary environment variables. Refer to the [values reference table](#valuesyaml-reference) below.
 
@@ -87,23 +107,23 @@ Edit the `values.yaml` file located in the chart directory to set the necessary 
 
 ## Common Steps After Configuration
 
-### Step 4: Deploy Smart Intersection
+### Step 5: Deploy Smart Intersection
 
-The Smart Traffic Intersection Agent depends on a running **Smart Intersection** deployment, which includes [SceneScape](https://github.com/open-edge-platform/scenescape). It provides the MQTT broker, camera pipelines, and scene analytics that the Traffic Agent consumes.
+The Smart Traffic Intersection Agent depends on a running **Smart Intersection** deployment, which includes [Scenescape](https://github.com/open-edge-platform/scenescape). It provides the MQTT broker, camera pipelines, and scene analytics that the Traffic Agent consumes.
 
-Follow the [Smart Intersection Helm Deployment Guide](https://github.com/open-edge-platform/edge-ai-suites/blob/release-1.2.0/metro-ai-suite/metro-vision-ai-app-recipe/smart-intersection/docs/user-guide/how-to-deploy-helm.md) to deploy it. Once all Smart Intersection pods are running and the MQTT broker is reachable, proceed to the next step.
+Follow the [Smart Intersection Helm Deployment Guide](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/smart-intersection/get-started/deploy-with-helm.html) to deploy it. Once all Smart Intersection pods are running and the MQTT broker is reachable, proceed to the next step.
 
-### Step 5: Configure GPU Support (Optional)
+### Step 6: Configure GPU Support (Optional)
 
 By default, the chart deploys VLM inference on an **Intel GPU**. To change graph or verify GPU configuration, edit the following values in `values.yaml`:
 
 | Value | Description | Default |
 | --- | --- | --- |
-| `vlmServing.gpu.enabled` | Enable Intel GPU for VLM inference. When `true`, `VLM_DEVICE` is automatically set to `GPU` and workers are forced to `1`. | `true` |
-| `vlmServing.gpu.resourceName` | Kubernetes GPU resource name exposed by the Intel device plugin. Use `gpu.intel.com/i915` for integrated/Arc GPUs, `gpu.intel.com/xe` for Data Center GPU Flex/Max. | `gpu.intel.com/i915` |
-| `vlmServing.gpu.resourceLimit` | Number of GPU devices to request | `1` |
-| `vlmServing.gpu.renderGroupIds` | List of render group GIDs for `/dev/dri` access. Defaults cover all common distros. | `[44, 109, 992]` |
-| `vlmServing.nodeSelector` | Pin VLM pod to nodes with GPUs (e.g., `intel.feature.node.kubernetes.io/gpu: "true"`) | `{}` |
+| `ovms.gpu.enabled` | Enable Intel GPU for VLM inference. When `true`, the target device is automatically set to `GPU`. | `true` |
+| `ovms.gpu.resourceName` | Kubernetes GPU resource name exposed by the Intel device plugin. Use `gpu.intel.com/i915` for integrated/Arc GPUs, `gpu.intel.com/xe` for Data Center GPU Flex/Max. | `gpu.intel.com/i915` |
+| `ovms.gpu.resourceLimit` | Number of GPU devices to request | `1` |
+| `ovms.gpu.renderGroupIds` | List of render group GIDs for `/dev/dri` access. Defaults cover all common distros. | `[44, 109, 992]` |
+| `ovms.nodeSelector` | Pin VLM pod to nodes with GPUs (e.g., `intel.feature.node.kubernetes.io/gpu: "true"`) | `{}` |
 
 Identify your cluster's GPU resource key by running:
 
@@ -115,12 +135,28 @@ To deploy on **CPU instead**, set:
 
 ```bash
 helm install stia . -n <your-namespace> --create-namespace \
-  --set vlmServing.gpu.enabled=false
+  --set ovms.gpu.enabled=false
 ```
 
 > **Note:** The `OV_CONFIG` environment variable is automatically set based on the device. When GPU is enabled, CPU-only options like `INFERENCE_NUM_THREADS` are excluded to avoid runtime errors.
 
-### Step 6: Deploy the Helm Chart
+### Supported VLM Models
+
+The default model is `OpenVINO/Phi-3.5-vision-instruct-int8-ov`. To use a different model, override it at install time:
+
+```bash
+helm install stia . -n <your-namespace> --create-namespace \
+  --set ovms.env.modelName=OpenVINO/InternVL2-1B-int4-ov
+```
+
+| Model | Structured JSON | Notes |
+| --- | --- | --- |
+| `OpenVINO/Phi-3.5-vision-instruct-int8-ov` | Good | Default. Pre-converted OpenVINO model; avoids on-cluster Hugging Face export flow. |
+| `OpenVINO/InternVL2-1B-int4-ov` | Good | Pre-converted OpenVINO alternative model; avoids on-cluster Hugging Face export flow. |
+
+> **Note:** The OVMS init container downloads and converts the selected model on first startup. Changing the model name requires deleting the existing model cache PVC so the init container re-downloads the new model.
+
+### Step 7: Deploy the Helm Chart
 
 Deploy the Smart Traffic Intersection Agent Helm chart:
 
@@ -128,9 +164,11 @@ Deploy the Smart Traffic Intersection Agent Helm chart:
 helm install stia . -n <your-namespace> --create-namespace
 ```
 
-> **Note:** The VLM OpenVINO Serving pod will download and convert the model on first startup. This may take several minutes depending on network speed and model size. To avoid re-downloading the model on every install cycle, set `vlmServing.persistence.keepOnUninstall` to `true` (the default). This tells Helm to retain the model cache PVC on uninstall.
+> **Note:** By default, the chart assumes the Smart Intersection RI (MQTT broker) is deployed in the same namespace as the STIA release. If the RI is in a different namespace, add `--set mqtt.brokerNamespace=<ri-namespace>`.
 
-### Step 7: Verify the Deployment
+> **Note:** The OVMS init container will download and convert the model on first startup. This may take several minutes depending on network speed and model size. To avoid re-downloading the model on every install cycle, set `ovms.persistence.keepOnUninstall` to `true` (the default). This tells Helm to retain the model cache PVC on uninstall.
+
+### Step 8: Verify the Deployment
 
 Check the status of the deployed resources to ensure everything is running correctly:
 
@@ -139,20 +177,21 @@ kubectl get pods -n <your-namespace>
 kubectl get services -n <your-namespace>
 ```
 
-You should see two pods:
+You should see these pods:
 
 | Pod | Description |
 | --- | ----------- |
 | `stia-traffic-agent-*` | The traffic intersection agent (backend + Gradio UI) |
-| `stia-vlm-openvino-serving-*` | The VLM inference server |
+| `stia-ovms-service-*` | The OVMS VLM inference server |
+| `<release>-metrics-manager-*` | Metrics Manager for System Telemetry and STIA application metrics |
 
-Wait until both pods show `Running` and `READY 1/1`:
+Wait until all pods show `Running` and `READY 1/1`:
 
 ```bash
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=stia -n <your-namespace> --timeout=600s
 ```
 
-### Step 8: Access the Application
+### Step 9: Access the Application
 
 #### Using NodePort (default)
 
@@ -162,19 +201,18 @@ The chart deploys services as `NodePort` by default. Retrieve the allocated port
 # Get the NodePort values
 kubectl get svc stia-traffic-agent -n <your-namespace>
 
-# Get the node IP
+# Find the node where the traffic-agent pod is running
+kubectl get pod -n <your-namespace> -o wide | grep traffic-agent
+# Use the INTERNAL-IP of that node (see NODE column)
 kubectl get nodes -o wide
-# Use the INTERNAL-IP of any node
 ```
 
 Then open your browser at:
 
 ```
-http://<node-ip>:<backend-node-port>   # Backend API (default NodePort: 30881)
-http://<node-ip>:<ui-node-port>         # Gradio UI   (default NodePort: 30860)
+http://<node-ip>:<backend-node-port>   # Backend API
+http://<node-ip>:<ui-node-port>         # Gradio UI
 ```
-
-> **Note:** If you are behind a corporate proxy, make sure the node IPs are included in your `no_proxy` / browser proxy exceptions.
 
 #### Using Port-Forward (ClusterIP)
 
@@ -193,7 +231,7 @@ Then open your browser at:
 - **Backend API:** `http://127.0.0.1:8081/docs`
 - **Gradio UI:** `http://127.0.0.1:7860`
 
-### Step 9: Uninstall the Helm Chart
+### Step 10: Uninstall the Helm Chart
 
 To uninstall the deployed Helm chart:
 
@@ -201,14 +239,14 @@ To uninstall the deployed Helm chart:
 helm uninstall stia -n <your-namespace>
 ```
 
-> **Note:** When `vlmServing.persistence.keepOnUninstall` is `true` (the default), the VLM model cache PVC is **retained** after uninstall to avoid re-downloading the model. This is recommended during development and testing. To fully clean up all PVCs:
+> **Note:** When `ovms.persistence.keepOnUninstall` is `true` (the default), the VLM model cache PVC is **retained** after uninstall to avoid re-downloading the model. This is recommended during development and testing. To fully clean up all PVCs:
 >
 > ```bash
 > kubectl get pvc -n <your-namespace>
 > kubectl delete pvc <pvc-name> -n <your-namespace>
 > ```
 >
-> To have Helm delete the PVC automatically on uninstall, set `vlmServing.persistence.keepOnUninstall=false` before deploying.
+> To have Helm delete the PVC automatically on uninstall, set `ovms.persistence.keepOnUninstall=false` before deploying.
 
 ---
 
@@ -218,75 +256,103 @@ helm uninstall stia -n <your-namespace>
 
 | Key | Description | Default |
 | --- | ----------- | ------- |
-| `global.proxy.httpProxy` | HTTP proxy URL | `""` |
-| `global.proxy.httpsProxy` | HTTPS proxy URL | `""` |
-| `global.proxy.noProxy` | Comma-separated no-proxy list | `""` |
+| `global.httpProxy` | HTTP proxy URL | `""` |
+| `global.httpsProxy` | HTTPS proxy URL | `""` |
+| `global.noProxy` | Comma-separated no-proxy list | `""` |
 
 ### Traffic Agent Settings
 
 | Key | Description | Default |
 | --- | ----------- | ------- |
-| `trafficAgent.image.repository` | Traffic agent container image repository | `intel/smart-traffic-intersection-agent` |
-| `trafficAgent.image.tag` | Image tag | `latest` |
-| `trafficAgent.service.type` | Kubernetes service type (`NodePort` or `ClusterIP`) | `NodePort` |
-| `trafficAgent.service.backendPort` | Backend API port | `8081` |
-| `trafficAgent.service.backendNodePort` | NodePort for backend API (only used when type is `NodePort`) | `30881` |
-| `trafficAgent.service.uiPort` | Gradio UI port | `7860` |
-| `trafficAgent.service.uiNodePort` | NodePort for Gradio UI (only used when type is `NodePort`) | `30860` |
-| `trafficAgent.intersection.name` | Unique intersection identifier | `intersection_1` |
-| `trafficAgent.intersection.latitude` | Intersection latitude | `37.51358` |
-| `trafficAgent.intersection.longitude` | Intersection longitude | `-122.25591` |
-| `trafficAgent.env.logLevel` | Application log level | `INFO` |
-| `trafficAgent.env.refreshInterval` | Dashboard refresh interval (seconds) | `15` |
-| `trafficAgent.env.weatherMock` | Use mock weather data (`true`/`false`) | `false` |
-| `trafficAgent.env.vlmTimeoutSeconds` | Timeout for VLM inference requests (seconds) | `600` |
-| `trafficAgent.mqtt.host` | MQTT broker hostname (SceneScape K8s service name) | `smart-intersection-broker` |
-| `trafficAgent.mqtt.port` | MQTT broker port | `1883` |
-| `trafficAgent.traffic.highDensityThreshold` | Object count for high-density classification | `10` |
-| `trafficAgent.traffic.moderateDensityThreshold` | Object count for moderate-density classification | `""` |
-| `trafficAgent.traffic.bufferDuration` | Traffic analysis buffer window | `""` |
-| `trafficAgent.persistence.enabled` | Enable persistent storage for agent data | `true` |
-| `trafficAgent.persistence.size` | PVC size for agent data | `1Gi` |
-| `trafficAgent.persistence.storageClass` | Storage class (empty = cluster default) | `""` |
+| `image.repository` | Traffic agent container image repository | `intel/smart-traffic-intersection-agent` |
+| `image.tag` | Image tag | `latest` |
+| `service.type` | Kubernetes service type (`NodePort` or `ClusterIP`) | `NodePort` |
+| `service.backendPort` | Backend API port | `8081` |
+| `service.uiPort` | Gradio UI port | `7860` |
+| `intersection.name` | Unique intersection identifier | `intersection_1` |
+| `intersection.latitude` | Intersection latitude | `37.51358` |
+| `intersection.longitude` | Intersection longitude | `-122.25591` |
+| `env.logLevel` | Application log level | `INFO` |
+| `env.refreshInterval` | Dashboard refresh interval (seconds) | `15` |
+| `env.weatherMock` | Use mock weather data (`true`/`false`) | `false` |
+| `env.vlmTimeoutSeconds` | Timeout for VLM inference requests (seconds) | `1800` |
+| `mqtt.host` | MQTT broker hostname. If set, takes precedence over the constructed FQDN. | `""` |
+| `mqtt.serviceName` | MQTT broker K8s service name | `smart-intersection-broker` |
+| `mqtt.brokerNamespace` | Namespace where the Smart Intersection RI (MQTT broker) is deployed. Only set this if the RI is in a different namespace than the STIA release. The FQDN is built as `<serviceName>.<brokerNamespace>.svc.cluster.local`. | `""` (defaults to release namespace) |
+| `mqtt.port` | MQTT broker port | `1883` |
+| `traffic.highDensityThreshold` | Object count for high-density classification | `10` |
+| `traffic.moderateDensityThreshold` | Object count for moderate-density classification | `""` |
+| `traffic.bufferDuration` | Traffic analysis buffer window | `""` |
+| `metrics.managerUrl` | External Metrics Manager API URL. Empty uses the bundled Metrics Manager service. | `""` |
+| `metrics.streamUrl` | External Metrics Manager SSE stream URL. Empty uses `<managerUrl>/metrics/stream`. | `""` |
+| `metrics.healthUrl` | External Metrics Manager health URL. Empty uses `<managerUrl>/health`. | `""` |
+| `metrics.pushEnabled` | Override custom STIA metric publishing. Empty follows `metricsManager.enabled`. | `""` |
+| `metrics.pushTimeoutSeconds` | Timeout for best-effort STIA metric publishing | `1.0` |
+| `persistence.enabled` | Enable persistent storage for agent data | `true` |
+| `persistence.size` | PVC size for agent data | `1Gi` |
+| `persistence.storageClass` | Storage class (empty = cluster default) | `""` |
 
-### VLM OpenVINO Serving Settings
+### OVMS (OpenVINO Model Server) Settings
 
 | Key | Description | Default |
 | --- | ----------- | ------- |
-| `vlmServing.image.repository` | VLM serving container image repository | `intel/vlm-openvino-serving` |
-| `vlmServing.image.tag` | Image tag | `1.3.2` |
-| `vlmServing.service.type` | Kubernetes service type (`NodePort` or `ClusterIP`) | `NodePort` |
-| `vlmServing.service.port` | VLM HTTP API port | `8000` |
-| `vlmServing.service.nodePort` | NodePort for VLM API (only used when type is `NodePort`) | `30800` |
-| `vlmServing.env.modelName` | Hugging Face model identifier | `microsoft/Phi-3.5-vision-instruct` |
-| `vlmServing.env.compressionWeightFormat` | Model weight format (`int4`, `int8`, `fp16`) | `int4` |
-| `vlmServing.env.device` | OpenVINO inference device when GPU is disabled (`CPU` or `GPU`). Ignored when `vlmServing.gpu.enabled=true` (auto-set to `GPU`). | `CPU` |
-| `vlmServing.env.maxCompletionTokens` | Max tokens per completion | `1500` |
-| `vlmServing.env.workers` | Number of serving workers. Forced to `1` when GPU is enabled. | `1` |
-| `vlmServing.env.logLevel` | VLM serving log level | `info` |
-| `vlmServing.env.openvinoLogLevel` | OpenVINO runtime log level | `1` |
-| `vlmServing.env.accessLogFile` | Access log file path (`/dev/null` to suppress) | `/dev/null` |
-| `vlmServing.env.seed` | Random seed for reproducible inference | `42` |
-| `vlmServing.env.ovConfigCpu` | OpenVINO config JSON for CPU mode (supports `INFERENCE_NUM_THREADS`) | `{"PERFORMANCE_HINT": "LATENCY", "INFERENCE_NUM_THREADS": 32}` |
-| `vlmServing.env.ovConfigGpu` | OpenVINO config JSON for GPU mode (includes GPU model cache) | `{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "/app/ov-model/gpu-cache"}` |
-| `vlmServing.huggingfaceToken` | Hugging Face API token (stored as a Secret) | `""` |
-| `vlmServing.gpu.enabled` | Enable Intel GPU for VLM inference. Auto-sets `VLM_DEVICE=GPU` and `WORKERS=1`. | `true` |
-| `vlmServing.gpu.resourceName` | Kubernetes GPU resource name exposed by the Intel device plugin (`gpu.intel.com/i915` or `gpu.intel.com/xe`) | `gpu.intel.com/i915` |
-| `vlmServing.gpu.resourceLimit` | Number of GPU devices to request | `1` |
-| `vlmServing.gpu.renderGroupIds` | List of GIDs for the `render` group added to `supplementalGroups` for `/dev/dri` access. All common distro values are included by default (44, 109, 992). | `[44, 109, 992]` |
-| `vlmServing.nodeSelector` | Pin VLM pod to GPU nodes (e.g., `intel.feature.node.kubernetes.io/gpu: "true"`) | `{}` |
-| `vlmServing.persistence.enabled` | Enable persistent storage for model cache | `true` |
-| `vlmServing.persistence.size` | PVC size for model cache | `20Gi` |
-| `vlmServing.persistence.storageClass` | Storage class (empty = cluster default) | `""` |
-| `vlmServing.persistence.keepOnUninstall` | Retain PVC on `helm uninstall` to avoid re-downloading the model | `true` |
+| `ovms.image.repository` | OVMS container image repository | `openvino/model_server` |
+| `ovms.image.tag` | Image tag (CPU) | `2026.1` |
+| `ovms.image.gpuTag` | Image tag (GPU) | `2026.1-gpu` |
+| `ovms.service.type` | Kubernetes service type (`NodePort` or `ClusterIP`) | `NodePort` |
+| `ovms.service.port` | OVMS HTTP API port | `8000` |
+| `ovms.env.modelName` | Hugging Face/OpenVINO model identifier | `OpenVINO/Phi-3.5-vision-instruct-int8-ov` |
+| `ovms.env.targetDevice` | Inference device when GPU is disabled (`CPU`). Ignored when `ovms.gpu.enabled=true` (auto-set to `GPU`). | `CPU` |
+| `ovms.env.weightFormat` | Model weight format (`int4`, `int8`). Empty = auto-detect based on device. | `""` |
+| `ovms.env.maxCompletionTokens` | Max tokens per completion | `1500` |
+| `ovms.env.logLevel` | OVMS log level | `INFO` |
+| `ovms.huggingfaceToken` | Hugging Face API token (stored as a Secret) | `""` |
+| `ovms.gpu.enabled` | Enable Intel GPU for VLM inference. Auto-sets target device to `GPU`. | `true` |
+| `ovms.gpu.resourceName` | Kubernetes GPU resource name exposed by the Intel device plugin (`gpu.intel.com/i915` or `gpu.intel.com/xe`) | `gpu.intel.com/i915` |
+| `ovms.gpu.resourceLimit` | Number of GPU devices to request | `1` |
+| `ovms.gpu.renderGroupIds` | List of GIDs for the `render` group added to `supplementalGroups` for `/dev/dri` access. All common distro values are included by default (44, 109, 992). | `[44, 109, 992]` |
+| `ovms.nodeSelector` | Pin VLM pod to GPU nodes (e.g., `intel.feature.node.kubernetes.io/gpu: "true"`) | `{}` |
+| `ovms.persistence.enabled` | Enable persistent storage for model cache | `true` |
+| `ovms.persistence.size` | PVC size for model cache | `20Gi` |
+| `ovms.persistence.storageClass` | Storage class (empty = cluster default) | `""` |
+| `ovms.persistence.keepOnUninstall` | Retain PVC on `helm uninstall` to avoid re-downloading the model | `true` |
 
 ### TLS / Secrets Settings
 
 | Key | Description | Default |
 | --- | ----------- | ------- |
 | `tls.caCert` | PEM-encoded CA certificate for the MQTT broker (base64-encoded in the Secret) | `""` |
-| `tls.caCertSecretName` | Name of an existing Secret containing the CA cert (overrides `tls.caCert`) | `smart-intersection-broker-rootcert` |
+| `tls.caCertSecretName` | Name of an existing Secret containing the CA cert (overrides `tls.caCert`). The Smart Intersection RI (release-2026.0.0) creates `smart-intersection-ca-secret`. | `smart-intersection-ca-secret` |
 | `tls.caCertKey` | Key name inside the external secret (required when `caCertSecretName` is set) | `root-cert` |
+
+### Metrics Manager Settings
+
+Metrics Manager provides the UI **System Telemetry** stream and accepts STIA application metrics.
+Keys are nested under `metricsManager` (camelCase — no hyphen).
+
+| Key | Description | Default |
+| --- | ----------- | ------- |
+| `metricsManager.enabled` | Deploy Metrics Manager | `true` |
+| `metricsManager.service.metricsPort` | Metrics Manager API and `/metrics/stream` port | `9090` |
+| `metricsManager.service.telegrafPort` | Telegraf Prometheus metrics port | `9273` |
+| `metricsManager.service.telegrafHttpPort` | Telegraf HTTP listener port for custom metrics | `8186` |
+| `metricsManager.hardware.gpu.enabled` | Enable Intel GPU telemetry through `/dev/dri` | `true` |
+| `metricsManager.pod.hostPID` | Enable host process namespace access for host telemetry | `true` |
+| `metricsManager.securityContext.privileged` | Enable privileged access for GPU/NPU host telemetry on trusted nodes | `true` |
+
+> **Security/runtime note:** Host telemetry may require the Metrics Manager pod to run with
+> `hostPID`, hostPath mounts such as `/sys`, `/run`, and `/dev/dri`, and
+> `metricsManager.securityContext.privileged=true` so qmassa can enumerate Intel GPU render
+> nodes and NPU sysfs telemetry. Enable elevated
+> deployment-time permissions only on trusted nodes and in accordance with your cluster security
+> policy.
+
+> **Note — using an external Metrics Manager:** If you set `metricsManager.enabled=false` to skip
+> deploying the bundled Metrics Manager, also set `metrics.managerUrl` (and optionally
+> `metrics.streamUrl` / `metrics.healthUrl`) to point at your external instance. Otherwise the
+> traffic-agent keeps its default URLs pointed at the (now-absent) bundled service, so the UI
+> **System Telemetry** stream and health checks will fail. Custom STIA metric publishing is
+> automatically disabled when Metrics Manager is disabled unless you override `metrics.pushEnabled`.
 
 ---
 
@@ -295,18 +361,17 @@ helm uninstall stia -n <your-namespace>
 ```yaml
 # values-override.yaml
 global:
-  proxy:
-    httpProxy: "http://proxy.example.com:8080"
-    httpsProxy: "http://proxy.example.com:8080"
-    noProxy: "localhost,127.0.0.1,10.0.0.0/8,.example.com"
+  httpProxy: "http://proxy.example.com:8080"
+  httpsProxy: "http://proxy.example.com:8080"
+  noProxy: "localhost,127.0.0.1,10.0.0.0/8,.example.com"
 
-trafficAgent:
-  intersection:
-    name: "intersection_main_st"
-    latitude: "37.7749"
-    longitude: "-122.4194"
-  mqtt:
-    host: "smart-intersection-broker"
+intersection:
+  name: "intersection_main_st"
+  latitude: "37.7749"
+  longitude: "-122.4194"
+
+mqtt:
+  brokerNamespace: ""  # defaults to release namespace; set only if RI is in a different namespace
 
 tls:
   caCert: |
@@ -321,11 +386,11 @@ helm install stia . -n traffic -f values-override.yaml --create-namespace
 
 ### Example: GPU Deployment
 
-To deploy VLM inference on an Intel GPU (the default), ensure `vlmServing.gpu.enabled` is `true` and the GPU resource name matches your cluster:
+To deploy VLM inference on an Intel GPU (the default), ensure `ovms.gpu.enabled` is `true` and the GPU resource name matches your cluster:
 
 ```yaml
 # values-gpu-override.yaml
-vlmServing:
+ovms:
   gpu:
     enabled: true
     # Use "gpu.intel.com/i915" for integrated / Arc A-series
@@ -354,9 +419,15 @@ To run VLM inference on CPU:
 
 ```bash
 helm install stia . -n traffic -f values-override.yaml \
-  --set vlmServing.gpu.enabled=false \
+  --set ovms.gpu.enabled=false \
   --create-namespace
 ```
+
+---
+
+## Deploy with Trusted Compute
+
+To deploy the Smart Traffic Intersection Agent with Intel Trusted Compute for hardware-isolated workloads (CPU or GPU passthrough), refer to the [Deploy with Trusted Compute using Helm](./deploy-with-trusted-compute-helm.md) guide.
 
 ---
 
@@ -365,7 +436,7 @@ helm install stia . -n traffic -f values-override.yaml \
 - Ensure that all pods are running and the services are accessible.
 - Access the Gradio UI and verify that it is showing the traffic intersection dashboard.
 - Check the backend API at `/docs` for the interactive Swagger documentation.
-- Verify that the traffic agent is receiving MQTT messages from SceneScape by checking the logs:
+- Verify that the traffic agent is receiving MQTT messages from Scenescape by checking the logs:
 
   ```bash
   kubectl logs -l app=stia-traffic-agent -n <your-namespace> -f
@@ -379,15 +450,13 @@ helm install stia . -n traffic -f values-override.yaml \
   kubectl logs <pod-name> -n <your-namespace>
   ```
 
-- **VLM pod stuck in CrashLoopBackOff:** The model download may have failed. Check logs and verify proxy settings (`global.proxy.httpProxy` / `global.proxy.httpsProxy`) and `huggingfaceToken` if the model requires authentication.
+- **VLM pod stuck in CrashLoopBackOff:** The model download may have failed. Check logs and verify proxy settings (`global.httpProxy` / `global.httpsProxy`) and `huggingfaceToken` if the model requires authentication.
 
 - **VLM model download stuck or not progressing:** Verify that proxy environment variables are correctly set inside the pod. A common cause is a mismatch between `values.yaml` key names and the template references (e.g., `http_proxy` vs `httpProxy`). Check with:
 
   ```bash
-  kubectl exec <vlm-pod-name> -n <your-namespace> -- env | grep -i proxy
+  kubectl exec <ovms-pod-name> -n <your-namespace> -- env | grep -i proxy
   ```
-
-- **`Option not found: INFERENCE_NUM_THREADS` error on GPU:** This occurs when the `OV_CONFIG` contains CPU-only options while running on GPU. Ensure `vlmServing.env.ovConfigGpu` does **not** include `INFERENCE_NUM_THREADS`. The chart automatically selects the correct config (`ovConfigCpu` or `ovConfigGpu`) based on `vlmServing.gpu.enabled`.
 
 - **GPU not detected / VLM pod Pending:** Verify the Intel GPU device plugin is installed and the GPU resource is available:
 
@@ -395,16 +464,27 @@ helm install stia . -n traffic -f values-override.yaml \
   kubectl describe node <gpu-node> | grep gpu.intel.com
   ```
 
-  If no GPU resource is listed, install the [Intel GPU device plugin for Kubernetes](https://github.com/intel/intel-device-plugins-for-kubernetes/blob/main/cmd/gpu_plugin/README.md). Also verify that `vlmServing.gpu.resourceName` matches the resource key reported by the device plugin (`gpu.intel.com/i915` for integrated/Arc, `gpu.intel.com/xe` for Data Center GPUs).
+  If no GPU resource is listed, install the [Intel GPU device plugin for Kubernetes](https://github.com/intel/intel-device-plugins-for-kubernetes/blob/main/cmd/gpu_plugin/README.md). Also verify that `ovms.gpu.resourceName` matches the resource key reported by the device plugin (`gpu.intel.com/i915` for integrated/Arc, `gpu.intel.com/xe` for Data Center GPUs).
 
 - **GPU permission denied (`/dev/dri` access):** The chart includes all common render group GIDs (44, 109, 992) by default. If your distro uses a different GID, find it with `getent group render` on the node and override:
+
   ```bash
-  helm install stia . --set-json 'vlmServing.gpu.renderGroupIds=[<your-gid>]'
+  helm install stia . --set-json 'ovms.gpu.renderGroupIds=[<your-gid>]'
   ```
 
-- **Traffic agent cannot connect to MQTT broker:** Verify that the SceneScape deployment is reachable from the cluster, the `trafficAgent.mqtt.host` value is correct, and the CA certificate is provided via `tls.caCert` or `tls.caCertSecretName`.
+- **Traffic agent cannot connect to MQTT broker:** Verify that the Scenescape deployment is reachable from the cluster, the `mqtt.host` value is correct, and the CA certificate is provided via `tls.caCert` or `tls.caCertSecretName`.
 
-- **PVC not cleaned up after uninstall:** When `vlmServing.persistence.keepOnUninstall` is `true` (the default), the model cache PVC is intentionally retained. To reclaim storage, delete it manually:
+- **System Telemetry metrics are missing:** Verify the Metrics Manager pod is running and check its logs. Then port-forward its API and Prometheus ports to test `/health` and Telegraf metrics:
+
+  ```bash
+  kubectl get pods -n <your-namespace> | grep metrics-manager
+  kubectl logs <metrics-manager-pod-name> -n <your-namespace>
+  kubectl port-forward <metrics-manager-pod-name> 9090:9090 9273:9273 -n <your-namespace>
+  curl -fsS http://127.0.0.1:9090/health
+  curl -fsS http://127.0.0.1:9273/metrics | head
+  ```
+
+- **PVC not cleaned up after uninstall:** When `ovms.persistence.keepOnUninstall` is `true` (the default), the model cache PVC is intentionally retained. To reclaim storage, delete it manually:
 
   ```bash
   # List the PVCs present in the given namespace

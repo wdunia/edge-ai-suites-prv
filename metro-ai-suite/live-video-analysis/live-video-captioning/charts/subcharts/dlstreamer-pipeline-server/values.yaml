@@ -11,7 +11,7 @@ image:
   # Type: string
   repository: intel/dlstreamer-pipeline-server
   # Type: string
-  tag: "2026.0.0-ubuntu24"
+  tag: "2026.2.0-20260715-weekly-ubuntu24"
   # Type: string
   pullPolicy: IfNotPresent
 
@@ -82,6 +82,8 @@ detectionModelsPvcName: ""
 modelsPath: "/home/pipeline-server/models"
 detectionModelsPath: "/home/pipeline-server/detection_models"
 
+# Whether to mount the detection models PVC into this pod.
+# Set false when detection pipeline is disabled or when only one shared models PVC exists.
 podSecurityContext: {}
 securityContext:
   privileged: true

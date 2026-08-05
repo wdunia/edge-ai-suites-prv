@@ -23,6 +23,7 @@ class SearchService:
         self.retrieval_url = f"{self.base_url}/v1/retrieval"
         self.get_url = f"{self.base_url}/v1/dataprep/get"
         self.delete_url = f"{self.base_url}/v1/dataprep/delete"
+        self.id_maps_url = f"{self.base_url}/v1/dataprep/list"
 
         self.default_bucket = getattr(settings, "STORAGE_DEFAULT_BUCKET", None) or os.getenv("STORAGE_BUCKET", "content-search")
 
@@ -34,15 +35,18 @@ class SearchService:
             path_key: file_path,
             "meta": meta or {}
         }
-        async with httpx.AsyncClient() as client:
+        # Use explicit timeout config for all phases
+        timeout_config = httpx.Timeout(timeout=1800.0, connect=60.0, read=1800.0, write=60.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
             try:
-                response = await client.post(self.ingest_url, json=payload, timeout=300.0)
+                response = await client.post(self.ingest_url, json=payload)
                 response.raise_for_status()
                 logger.info(f"Successfully triggered ingest for {file_path}")
                 return response.json()
             except Exception as e:
-                logger.error(f"Search service ingest error: {str(e)}")
-                return {"error": str(e)}
+                error_msg = str(e) or f"{type(e).__name__}: {repr(e)}"
+                logger.error(f"Search service ingest error: {error_msg}")
+                return {"error": error_msg}
 
     async def ingest_text(self, text: str, file_path: str = None, bucket_name: str = None, meta: dict = None):
         payload = {
@@ -108,5 +112,15 @@ class SearchService:
             except Exception as e:
                 logger.error(f"Error deleting chroma index for {target_uri}: {str(e)}")
                 return {"error": str(e)}
+
+    async def get_id_maps(self) -> dict:
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(self.id_maps_url, timeout=10.0)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                logger.error(f"Error fetching id_maps from indexer service: {str(e)}")
+                return {"visual": {}, "document": {}, "video_summary": {}}
 
 search_service = SearchService()

@@ -8,6 +8,12 @@ Intel-operated generative artificial intelligence solutions.
 -->
 # ROS2 KPI Monitoring & Analysis Tools
 
+## Documentation
+
+Comprehensive documentation on this component is available here: [dev guide](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/robotics/dev_guide/tutorials_amr/kpi_monitoring/index.html).
+
+## Overview
+
 Monitor, analyze, and visualize Key Performance Indicators in ROS2 systems — node latencies, CPU/memory usage, message flow, and thread-level resource distribution.
 
 ## ⚡ Quick Start (Easiest Way)
@@ -53,19 +59,29 @@ uv run python src/monitor_stack.py --duration 30    # Quick 30-second health che
 
 | Requirement | Install |
 |-------------|---------|
-| ROS2 Humble / Jazzy | [Intel Robotics AI Suite Getting Started](https://docs.openedgeplatform.intel.com/2025.2/edge-ai-suites/robotics-ai-suite/robotics/gsg_robot/index.html) |
+| ROS2 Humble / Jazzy | [Intel Robotics AI Suite Getting Started](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/robotics-ai-suite/robotics/gsg_robot/index.html) |
 | Python 3.8+ | included with Ubuntu 22.04 |
-| `pidstat` | `sudo apt-get install sysstat` |
-| `psutil`, `matplotlib`, `numpy` | `uv sync` |
+| `uv`, `pidstat`, `psutil`, `matplotlib`, `numpy` | installed automatically by `make install` |
 
 ---
 
 ## Installation
 
+Install the Debian package for your ROS 2 distro:
+
 ```bash
-git clone <repository-url>
-cd ros2-kpi
-chmod +x src/*.py monitor_stack.py
+# ROS 2 Jazzy (Ubuntu 24.04)
+sudo apt-get install ros-jazzy-benchmark-framework
+
+# ROS 2 Humble (Ubuntu 22.04)
+sudo apt-get install ros-humble-benchmark-framework
+```
+
+Then install Python and optional dependencies:
+
+```bash
+cd /opt/ros/$ROS_DISTRO/share/benchmark-framework
+make install
 ```
 
 ---
@@ -219,7 +235,7 @@ Parses CSV logs from `ros2_graph_monitor.py` and generates message timestamp, fr
 
 ### visualize_graph.py — Interactive Pipeline Graph
 
-Renders the full ROS2 computation graph as a directed topology diagram. Nodes are color-coded by category; topics are shown as labelled edges.
+Renders the full ROS2 computation graph as a directed topology diagram. Nodes are color-coded by category; topics are shown as labeled edges.
 
 ```bash
 ./src/visualize_graph.py SESSION_DIR [OPTIONS]
@@ -262,26 +278,89 @@ uv run python src/analyze_rosbag.py path/to/bag.db3
 
 ### picknplace_run.sh — Pick-and-Place Benchmark Runner
 
-Automates a full pick-and-place experiment: launches the `picknplace warehouse` simulation, waits for it to stabilize, captures GPU+resource metrics for 120 seconds, then cleanly stops the simulation.
+Thin wrapper around `benchmark_runner.sh` for the pick-and-place scenario.
+All scenario behavior (launch command, stop condition, bag topics, cleanup)
+is defined in [`config/picknplace_run.yaml`](config/picknplace_run.yaml).
 
 ```bash
-./src/picknplace_run.sh
+bash src/picknplace_run.sh [--timeout SECS] [--record] [--plot]
+
+# Override the run profile (e.g. custom launch args or topic list)
+bash src/picknplace_run.sh --run-config config/picknplace_run.yaml
+make picknplace-run RUN_CONFIG=config/my_picknplace.yaml
 ```
 
-**What it does:**
-
-1. Launches `ros2 launch picknplace warehouse.launch.py` in the background.
-2. Waits **30 seconds** for the simulation to stabilize.
-3. Starts `uv run python src/monitor_stack.py --gpu --duration 120` to capture GPU and resource metrics.
-4. After 120 seconds, sends `SIGINT` to the simulation process (equivalent to Ctrl-C) and waits for both processes to exit cleanly.
-
-Results land in the latest `monitoring_sessions/` directory and can be visualized directly:
+Results land in `monitoring_sessions/picknplace/<timestamp>/` and can be visualized:
 
 ```bash
 uv run python src/visualize_timing.py <session>/graph_timing.csv --delays --frequencies --show
 uv run python src/visualize_resources.py <session>/resource_usage.log --cores --heatmap --show
 uv run python src/visualize_graph.py <session>/graph_timing.csv --show
 ```
+
+---
+
+### bag_replay_run.sh — Offline Bag-Replay Benchmarking
+
+Replays any pre-recorded ROS 2 bag through the monitor stack without a live robot or simulator.
+Produces deterministic, reproducible KPI results — suitable for CI environments.
+
+```bash
+# Single replay pass
+make bag-replay BAG=monitoring_sessions/wandering/20260430_145256/bag
+
+# Faster-than-realtime replay
+make bag-replay BAG=... RATE=2.0
+
+# 10 independent runs → aggregate KPI
+make bag-replay-benchmark BAG=... RUNS=10 RATE=1.0
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `BAG` | (required) | Path to bag directory containing `metadata.yaml` |
+| `RATE` | `1.0` | Replay speed multiplier |
+| `LOOP` | `1` | Replay passes per session (0 = infinite) |
+| `RUNS` | `10` | Independent runs for `bag-replay-benchmark` |
+| `PAUSE` | `10` | Seconds between runs |
+
+Outputs per session: `kpi.json` (Level 1), `kpi_level2.json` (Level 2, chained).
+
+---
+
+### fastmapping_run.sh — fast_mapping RGB-D Benchmark
+
+Thin wrapper around `benchmark_runner.sh` for the fast-mapping scenario.
+Launches `ros2 launch fast_mapping fast_mapping.launch.py`, which starts
+`fast_mapping_node`, `rviz2`, and replays the bundled Intel spinning RGB-D bag
+(`/opt/ros/<distro>/share/bagfiles/spinning`, ~12 s, 175 depth frames).
+All scenario behavior is defined in [`config/fastmapping_run.yaml`](config/fastmapping_run.yaml).
+
+```bash
+# Single run
+make fastmapping
+
+# 10-run benchmark
+make fastmapping-benchmark RUNS=10
+
+# Generate trigger-timeline plots
+make fastmapping-plot
+
+# Override the run profile
+make fastmapping RUN_CONFIG=config/fastmapping_run.yaml
+```
+
+After the run, `analyze_fastmapping_log.py` parses the node's shutdown timing
+table and patches `kpi.json` with:
+
+| KPI | Typical value | Description |
+|-----|--------------|-------------|
+| `throughput_hz` | 7–16 Hz | Frame processing rate |
+| `mean_latency_ms` | ~24 ms | Compute time excl. wait-for-frame |
+| `mean_jitter_ms` | ~4 ms | Window-to-window timing variation |
+
+Results: `monitoring_sessions/fastmapping/<timestamp>/kpi.json`,
+`kpi_level2.json`, `fastmapping_procedures.json`.
 
 ---
 
@@ -336,135 +415,63 @@ For detailed test results and troubleshooting, see [REMOTE_MONITORING_TEST_REPOR
 
 ---
 
-## 🖥️ Intel GPU Monitoring (Kernel 6.17+)
+## 🖥️ Intel GPU Monitoring
 
-Remote monitoring automatically collects Intel GPU metrics when `--remote-ip` is set.
-It tries **`intel_gpu_top`** first (per-engine busy%, power, RC6%) and falls back to
-sysfs RC6 residency if PMU access is blocked.
+GPU monitoring uses **qmassa** — reads xe/i915 DRM `fdinfo` directly.
+No `CAP_PERFMON`, no PMU, no custom kernel headers required.
 
-### Why a custom build?
-
-The `intel-gpu-tools` package shipped with Ubuntu 24.04 (`1.28`) crashes with
-`get_num_gts: Assertion failed` on **kernel 6.17** (Meteor Lake / Arc GPUs).
-Git master has the fix, so we build it once from source.
-
-### One-time build on the remote machine
+### Install qmassa (once)
 
 ```bash
-# 1 — build tools (no sudo required)
-pip3 install --user --break-system-packages meson ninja
-
-# 2 — clone git master (shallow, ~50 MB)
-cd ~ && git clone --depth=1 https://gitlab.freedesktop.org/drm/igt-gpu-tools.git
-
-# 3 — disable the assembler sub-project (needs flex, not required for intel_gpu_top)
-sed -i 's/if libdrm_intel.found()/if false # no flex/' ~/igt-gpu-tools/meson.build
-
-# 4 — download dev headers (no sudo -- just extracts to ~/local-devpkgs)
-mkdir -p ~/devpkg-downloads ~/local-devpkgs
-cd ~/devpkg-downloads
-apt-get download libpci-dev libudev-dev libglib2.0-dev
-for deb in *.deb; do dpkg -x "$deb" ~/local-devpkgs/; done
-
-# 5 — create symlinks / pkg-config shims so the build finds libraries
-mkdir -p ~/.local/lib/pkgconfig ~/.local/lib
-ln -sf /usr/lib/x86_64-linux-gnu/libpci.so.3  ~/.local/lib/libpci.so
-
-cat > ~/.local/lib/pkgconfig/libpci.pc   << 'EOF'
-prefix=/home/intel/local-devpkgs/usr
-includedir=${prefix}/include/x86_64-linux-gnu
-libdir=/home/intel/.local/lib
-Name: libpci
-Version: 3.10.0
-Libs: -L${libdir} -lpci
-Cflags: -I${includedir}
-EOF
-
-cat > ~/.local/lib/pkgconfig/libudev.pc  << 'EOF'
-prefix=/home/intel/local-devpkgs/usr
-includedir=${prefix}/include
-libdir=/usr/lib/x86_64-linux-gnu
-Name: libudev
-Version: 255
-Libs: -L${libdir} -ludev
-Cflags: -I${includedir}
-EOF
-
-cat > ~/.local/lib/pkgconfig/libkmod.pc  << 'EOF'
-prefix=/usr
-libdir=${prefix}/lib/x86_64-linux-gnu
-includedir=${prefix}/include
-Name: libkmod
-Version: 31
-Libs: -L${libdir} -lkmod
-Cflags: -I${includedir}
-EOF
-
-cat > ~/.local/lib/pkgconfig/libproc2.pc << 'EOF'
-prefix=/home/intel/local-devpkgs/usr
-includedir=${prefix}/include/libproc2
-libdir=/usr/lib/x86_64-linux-gnu
-Name: libproc2
-Version: 4.0.4
-Libs: -L${libdir} -lproc2
-Cflags: -I${includedir}
-EOF
-
-# Copy glib pkg-config files and point them at the extracted headers
-cp ~/local-devpkgs/usr/lib/x86_64-linux-gnu/pkgconfig/glib*.pc \
-   ~/local-devpkgs/usr/lib/x86_64-linux-gnu/pkgconfig/gobject*.pc \
-   ~/local-devpkgs/usr/lib/x86_64-linux-gnu/pkgconfig/gmodule*.pc \
-   ~/local-devpkgs/usr/lib/x86_64-linux-gnu/pkgconfig/gthread*.pc \
-   ~/local-devpkgs/usr/lib/x86_64-linux-gnu/pkgconfig/gio*.pc \
-   ~/.local/lib/pkgconfig/ 2>/dev/null || true
-for pc in ~/.local/lib/pkgconfig/g{lib,object,module,thread,io}*.pc; do
-  sed -i "s|^prefix=.*|prefix=/home/intel/local-devpkgs/usr|;s|^libdir=.*|libdir=/usr/lib/x86_64-linux-gnu|" "$pc"
-done
-
-# 6 — configure and build (only intel_gpu_top)
-export PATH="$HOME/.local/bin:$PATH"
-export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
-cd ~/igt-gpu-tools
-meson setup build --prefix=$HOME/.local \
-  -Dtests=disabled -Doverlay=disabled -Drunner=disabled \
-  -Ddocs=disabled  -Dman=disabled   -Dlibunwind=disabled
-ninja -C build tools/intel_gpu_top
-
-# 7 — install
-cp build/tools/intel_gpu_top ~/.local/bin/
+make install-qmassa
+# installs Rust toolchain via rustup (if absent), then:
+# cargo install --locked qmassa qmmd
+# binaries land in ~/.cargo/bin/
 ```
 
-### Enable PMU (richer metrics)
+### Enable GPU monitoring
 
-`intel_gpu_top` needs `CAP_PERFMON` when `perf_event_paranoid > 0`.
-Run **once** (requires sudo on the remote):
+GPU hardware is **auto-detected** at startup. Pass `--gpu` to force-enable:
 
 ```bash
-# From your local machine:
-make setup-remote-gpu REMOTE_IP=<remote-ip> [REMOTE_USER=intel]
+# Auto-detect (recommended)
+uv run python src/monitor_stack.py --duration 180
 
-# Or directly on the remote:
-sudo setcap cap_perfmon+eip ~/.local/bin/intel_gpu_top
+# Explicit GPU flag
+uv run python src/monitor_stack.py --gpu --duration 180
+
+# Combined GPU + NPU
+uv run python src/monitor_stack.py --gpu --npu --duration 180
+
+# Remote session (sysfs fallback — qmassa is local-only)
+uv run python src/monitor_stack.py --remote-ip 10.0.0.1 --gpu --duration 180
 ```
 
-With CAP_PERFMON you get full data: per-engine busy%, actual/requested frequency,
-RC6 residency %, and GPU/Package power.
-Without it the monitor falls back to sysfs RC6 residency (busy% + frequency only).
+### Standalone per-PID GPU analyzer
+
+```bash
+uv run python src/gpu_pid_analyzer.py                  # one-shot snapshot
+uv run python src/gpu_pid_analyzer.py --watch          # refresh every 2 s
+uv run python src/gpu_pid_analyzer.py --duration 60    # run for 60 s
+uv run python src/gpu_pid_analyzer.py --csv gpu.csv    # CSV logging
+```
 
 ### What gets collected
 
-| Field | Source | Description |
-|-------|--------|-------------|
-| `busy_pct` | intel_gpu_top / sysfs | Render/3D engine busy % |
-| `act_freq_mhz` | intel_gpu_top / sysfs | Actual GT clock (MHz) |
-| `req_freq_mhz` | intel_gpu_top | Requested GT clock (MHz) |
-| `rc6_pct` | intel_gpu_top | RC6 idle residency % |
-| `power_gpu_w` | intel_gpu_top | GPU power draw (W) |
-| `power_pkg_w` | intel_gpu_top | Package power draw (W) |
-| `engines` | intel_gpu_top | Per-engine: Render, Copy, Video, Compute busy % |
+| Field | Description |
+|-------|-------------|
+| `busy_pct` | Overall GPU busy % (peak engine class) |
+| `act_freq_mhz` | Actual GT clock (MHz) |
+| `power_gpu_w` / `power_pkg_w` | GPU / package power via RAPL (W) |
+| `temp_c` | GPU temperature from hwmon sysfs (°C) |
+| `vram_used_mb` / `smem_used_mb` | VRAM and shared memory usage (MB) |
+| `throttled` | True when any throttle reason is active |
+| `engines` | Per-class busy %: Render/3D, Blitter, Compute, Video, VE |
+| `clients` | Per-PID: pid, name, total busy %, per-engine busy % |
+| `drv_name` | DRM driver (`xe` or `i915`) |
 
 Results are written to `gpu_usage.log` (JSON-lines) in each session directory and
-visualised as `visualizations/gpu_utilization.png`.
+visualized as `visualizations/gpu_utilization.png`.
 
 ---
 
@@ -511,7 +518,7 @@ Results are written to `npu_usage.log` (JSON-lines) in each session directory:
 
 | Field | Description |
 |-------|-------------|
-| `busy_pct` | NPU compute utilisation % (delta-sampled) |
+| `busy_pct` | NPU compute utilization % (delta-sampled) |
 | `cur_freq_mhz` | Current NPU clock (MHz) |
 | `max_freq_mhz` | Maximum NPU clock (MHz) |
 | `memory_used_mb` | Memory utilization (MB) |
@@ -520,7 +527,7 @@ Results are written to `npu_usage.log` (JSON-lines) in each session directory:
 
 `uv run python src/visualize_npu.py <session>` generates `visualizations/npu_dashboard.png` with three panels:
 
-1. **NPU Busy %** — utilisation over time with fill
+1. **NPU Busy %** — utilization over time with fill
 2. **Clock Frequency** — current vs max (clickable legend)
 3. **Memory Utilization** — MB over time with fill
 
@@ -538,6 +545,280 @@ ssh intel@<ip> "cat /sys/class/accel/accel0/device/npu_max_frequency_mhz"
 If the directory does not exist, the NPU driver is not loaded or the hardware is
 not present. In that case `monitor_resources` prints `[NPU] No Intel NPU sysfs
 found — NPU monitoring skipped.` and continues normally.
+
+---
+
+## ⚡ Intel RAPL CPU Package Power Monitoring
+
+CPU package power is sampled in the background via the Linux **powercap RAPL**
+sysfs interface — **no root, no special capabilities required**.  Available on
+Intel bare-metal systems running kernel ≥ 3.13 with `CONFIG_INTEL_RAPL`.
+Returns `null` on WSL2 and ARM.
+
+### RAPL quick start
+
+```bash
+# Standalone — CPU power only
+uv run python src/monitor_resources.py --power
+
+# Combined with CPU/memory/NPU resource monitoring
+uv run python src/monitor_resources.py --memory --npu --power
+
+# Check whether RAPL is available on this machine
+uv run python src/monitor_resources.py --check-hw
+```
+
+`monitor_stack.py` **auto-enables** RAPL power monitoring when the sysfs path
+is readable — no flag needed for normal benchmark sessions.
+
+### How RAPL works
+
+`monitor_resources.py --power` launches a daemon thread that:
+
+1. Reads `/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj` (µJ counter).
+2. Computes `power_w = Δenergy_µJ / Δtime_s / 1_000_000`, handling counter
+   wraparound using `max_energy_range_uj`.
+3. Appends a JSON-line `{"ts": <epoch>, "power_w": <float>}` to `cpu_power.log`
+   each interval.
+
+### RAPL logged fields
+
+`cpu_power.log` (JSON-lines) in each session directory:
+
+| Field | Description |
+|-------|-------------|
+| `ts` | Unix timestamp of the sample |
+| `power_w` | CPU package power in watts |
+
+`analyze_trigger_latency.py` reads `cpu_power.log` and stores the **mean** as
+`cpu_pkg_power_w` in the Level 1 KPI `thermal` section.
+
+### Verifying RAPL availability
+
+```bash
+uv run python src/monitor_resources.py --check-hw
+# [PWR] RAPL path     : /sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj
+# [PWR] Status        : ✅ AVAILABLE
+# [PWR] Detail        : Intel RAPL accessible at /sys/class/...
+```
+
+---
+
+## JSON Output Schema Reference
+
+Benchmark runs may produce the following JSON result files validated against versioned
+schemas in [`schemas/`](schemas/):
+
+| File | Schema | Written by |
+|------|--------|------------|
+| `kpi.json` | `kpi_level1_v1` | `analyze_trigger_latency.py` |
+| `kpi_level2.json` | `kpi_level2_v1` | `analyze_pipeline_latency.py` |
+| `kpi_level2_traced.json` | `kpi_level2_v1` | `analyze_bag_e2e.py` |
+
+Fields typed `number | null` are `null` when the relevant monitor (resource
+monitor, thermal, GPU) was not active during the session.
+
+---
+
+### Level 1 — `kpi.json`
+
+Top-level fields:
+
+| Field | Type | Required | Unit | Description |
+|-------|------|----------|------|-------------|
+| `schema_version` | string | ✅ | — | Always `"level1_v1"` |
+| `throughput_hz` | number\|null | ✅ | Hz | System-level throughput derived from the dominant (highest trigger-count) node pair |
+| `mean_latency_ms` | number\|null | ✅ | ms | Mean processing latency for the dominant pair |
+| `max_jitter_ms` | number\|null | ✅ | ms | Maximum jitter across all node pairs |
+| `min_jitter_ms` | number\|null | ✅ | ms | Minimum jitter across all node pairs |
+| `mean_jitter_ms` | number\|null | ✅ | ms | Mean jitter for the dominant pair |
+| `jitter_stdev_ms` | number\|null | ✅ | ms | Standard deviation of per-node mean jitter values |
+| `cpu_mean_pct` | number\|null | ✅ | % | Mean CPU utilization (`pidstat`); null when resource monitor was not run |
+| `cpu_max_pct` | number\|null | ✅ | % | Peak CPU utilization; null when resource monitor was not run |
+| `thermal` | object\|null | — | — | Session-level thermal summary (see below); null when not collected |
+| `per_node` | object | ✅ | — | Per-node summary keyed by fully-qualified node name (see below) |
+| `pairs` | array | ✅ | — | Full scalar statistics for every de-duplicated (node, input, output) pair |
+| `metadata` | object | ✅ | — | Session provenance (see below) |
+
+#### `per_node` entry fields
+
+Each key is a fully-qualified ROS 2 node name (e.g. `/controller_server`):
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
+| `throughput_hz` | number\|null | Hz | Output publish rate for this node |
+| `mean_latency_ms` | number | ms | Mean input→output processing latency |
+| `mean_jitter_ms` | number | ms | Mean inter-message jitter |
+| `max_jitter_ms` | number | ms | Maximum inter-message jitter |
+| `num_samples` | integer | — | Trigger sample count |
+| `primary_input` | string | — | Topic used as the latency trigger input |
+| `primary_output` | string | — | Topic used as the latency trigger output |
+| `pipeline_stage` | string | — | Classified stage: `Sensor` / `Perception` / `Planning` / `Control` / `Other` |
+
+#### `metadata` fields (Level 1 & 2 shared)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Session directory name (timestamp) |
+| `datetime` | string | UTC ISO 8601 timestamp of KPI generation |
+| `hostname` | string | Machine that ran the benchmark |
+| `arch` | string | CPU architecture (e.g. `x86_64`, `aarch64`) |
+| `os` | string | OS name and kernel release |
+| `data_path` | string | Absolute path to the session directory |
+| `framework_version` | string | Benchmark framework version (e.g. `0.2.3`) |
+| `ros_distro` | string | ROS 2 distribution (e.g. `jazzy`, `humble`) |
+| `hardware` | object | Hardware provenance: CPU model, core count, RAM |
+
+---
+
+### Level 2 — `kpi_level2.json`
+
+Top-level fields:
+
+| Field | Type | Required | Unit | Description |
+|-------|------|----------|------|-------------|
+| `schema_version` | string | ✅ | — | Always `"level2_v1"` |
+| `pipeline` | object | ✅ | — | Pipeline entry/exit points and stage sequence (see below) |
+| `e2e_latency_ms` | object | ✅ | ms | End-to-end latency statistics (see below) |
+| `throughput_hz` | number\|null | ✅ | Hz | Effective pipeline throughput — minimum throughput across all stage representatives |
+| `drop_rate_pct` | number\|null | ✅ | % | Estimated message drop rate: sensor-stage inputs that did not produce a pipeline output |
+| `bottleneck_stage` | string\|null | ✅ | — | Pipeline stage with the highest mean latency contribution |
+| `stage_latency_ms` | object | ✅ | ms | Per-stage latency breakdown; keys are stage names (`Sensor`, `Perception`, `Planning`, `Control`, `Other`) |
+| `cpu_mean_pct` | number\|null | ✅ | % | Mean CPU utilization across the session; null when not collected |
+| `cpu_max_pct` | number\|null | ✅ | % | Peak CPU utilization; null when not collected |
+| `level1_source` | string | ✅ | — | Absolute path to the Level 1 `kpi.json` used as input |
+| `bag_source` | string | — | — | Absolute path to the `.mcap` bag directory (present when traced correlation was used) |
+| `metadata` | object | ✅ | — | Session provenance — same structure as Level 1 `metadata` |
+
+#### `pipeline` fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `input_topic` | string | Primary sensor input topic entering the pipeline (e.g. `/scan`) |
+| `output_topic` | string | Final control output topic (e.g. `/cmd_vel_smoothed`) |
+| `stage_sequence` | array | Ordered list of pipeline stage names present in this session |
+
+#### `e2e_latency_ms` fields
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
+| `mean` | number\|null | ms | Mean end-to-end latency |
+| `p50` | number\|null | ms | Median end-to-end latency |
+| `p90` | number\|null | ms | 90th percentile end-to-end latency |
+| `p99` | number\|null | ms | 99th percentile end-to-end latency |
+| `max` | number\|null | ms | Maximum end-to-end latency |
+| `n` | integer\|null | — | Sample count used for end-to-end stats (`min(stage.n)` for `chained`, correlated message count for `traced`) |
+| `method` | string | — | `"chained"` (sum of per-stage representative pair latencies from Level 1 data) or `"traced"` (direct bag correlation) |
+
+---
+
+## 📤 KPI Export: CSV & Excel
+
+All benchmark scripts support exporting results to **CSV** and optionally **Excel (`.xlsx`)** for analysis in spreadsheet tools.
+
+### Level 1 — Per-pair latency (analyze_trigger_latency.py)
+
+```bash
+uv run python src/analyze_trigger_latency.py \
+    --json-out <session>/kpi.json \
+    --csv-out  <session>/kpi_pairs.csv \
+    --xlsx-out <session>/kpi_pairs.xlsx   # requires: pip install openpyxl
+```
+
+One row per node/input→output pair:
+
+| Column | Description |
+|--------|-------------|
+| `session` | Session directory name (timestamp) |
+| `node` | ROS 2 node name |
+| `pipeline_stage` | Classified stage: Sensor / Perception / Planning / Control / Other |
+| `input` | Input topic |
+| `output` | Output topic |
+| `n` | Number of trigger samples |
+| `mean_ms` | Mean processing latency (ms) |
+| `stdev_ms` | Standard deviation (ms) |
+| `min_ms` | Minimum latency (ms) |
+| `p50_ms` | 50th percentile / median (ms) |
+| `p90_ms` | 90th percentile (ms) |
+| `p99_ms` | 99th percentile (ms) |
+| `max_ms` | Maximum observed latency (ms) |
+| `trigger_count` | Total trigger events counted |
+| `fps` | Estimated output throughput (Hz) |
+| `jitter_mean_ms` | Mean inter-message jitter (ms) |
+| `jitter_max_ms` | Maximum inter-message jitter (ms) |
+
+### Level 2 — Pipeline end-to-end (analyze_pipeline_latency.py)
+
+```bash
+uv run python src/analyze_pipeline_latency.py \
+    --kpi      <session>/kpi.json \
+    --csv-out  <session>/kpi_level2.csv \
+    --xlsx-out <session>/kpi_level2.xlsx  # requires: pip install openpyxl
+```
+
+One **e2e summary row** (`type=e2e`) followed by one row per pipeline **stage** (`type=stage`):
+
+| Column | e2e row | stage row |
+|--------|---------|-----------|
+| `type` | `e2e` | `stage` |
+| `session` | Session name | Session name |
+| `stage` | `e2e` | Stage name (e.g. `Perception`) |
+| `representative_node` | _(blank)_ | Node with highest trigger count in stage |
+| `representative_input` | Pipeline input topic | Stage input topic |
+| `representative_output` | Pipeline output topic | Stage output topic |
+| `mean_ms` | Chained e2e mean (ms) | Stage mean (ms) |
+| `p50_ms` | Chained p50 (ms) | Stage p50 (ms) |
+| `p90_ms` | Chained p90 (ms) | Stage p90 (ms) |
+| `p99_ms` | Chained p99 (ms) | Stage p99 (ms) |
+| `max_ms` | Chained max (ms) | Stage max (ms) |
+| `n` | Min samples across stages | Stage sample count |
+| `throughput_hz` | Pipeline throughput (Hz) | Stage throughput (Hz) |
+| `drop_rate_pct` | Message drop rate (%) | _(blank)_ |
+| `bottleneck_stage` | Slowest stage name | _(blank)_ |
+| `cpu_mean_pct` | Mean CPU utilization (%) | _(blank)_ |
+| `cpu_max_pct` | Peak CPU utilization (%) | _(blank)_ |
+
+### Multi-run aggregated (aggregate_kpi.py)
+
+```bash
+uv run python src/aggregate_kpi.py monitoring_sessions/wandering/bench_XXXX \
+    --csv-out results_aggregated.csv
+```
+
+One row per (node, input, output) pair aggregated across all runs in the bench directory. Columns: `node`, `input`, `output`, `category`, `runs_seen`, `total_runs`, `mean_fps`, `fps_stdev`, `mean_ms`, `stdev_runs`, `cv_pct`, `min_mean_ms`, `max_mean_ms`, `mean_p90_ms`, `worst_p90_ms`, `best_p90_ms`, `mean_p50_ms`, `mean_stdev_ms`, `mean_n`.
+
+> **Excel support**: install `openpyxl` once with `pip install openpyxl`. If not installed, `--xlsx-out` prints a warning and is skipped; all other outputs are unaffected.
+
+---
+
+### KPI Regression Detection (compare_kpi.py)
+
+Compare a current benchmark result against a stored baseline and detect regressions.
+
+```bash
+python3 src/compare_kpi.py \
+    --baseline tests/fixtures/baseline/kpi_level2.json \
+    --current  monitoring_sessions/wandering/<session>/kpi.json \
+    --threshold 5.0 \
+    --report   report.json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--baseline PATH` | Baseline `kpi.json` or `kpi_level2.json` |
+| `--current PATH` | Current-run KPI JSON to evaluate |
+| `--threshold PCT` | Regression threshold in % (default: `5.0`) |
+| `--report PATH` | Optional JSON summary report output |
+
+Exit codes: **0** = all KPIs within threshold · **1** = regression(s) found · **2** = file/schema error.
+
+Or use the Makefile shortcut:
+
+```bash
+make regression-check \
+    BASELINE=tests/fixtures/baseline/kpi.json \
+    CURRENT=monitoring_sessions/wandering/<session>/kpi.json
+```
 
 ---
 
@@ -614,7 +895,7 @@ sudo usermod -aG docker $USER  # Logout/login required
 uv sync
 ```
 
-### Documentation
+### Grafana Documentation
 
 See [docs/GRAFANA_SETUP.md](docs/GRAFANA_SETUP.md) for:
 - Detailed setup instructions

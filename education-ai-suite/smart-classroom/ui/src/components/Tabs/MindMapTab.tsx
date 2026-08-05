@@ -3,11 +3,13 @@ import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import "../../assets/css/MindMap.css";
 import jsMind from "jsmind";
 import "jsmind/style/jsmind.css";
+import html2canvas from "html2canvas";
 import {
   clearMindmapStartRequest,
   mindmapStart as uiMindmapStart,
   mindmapSuccess as uiMindmapSuccess,
   mindmapFailed as uiMindmapFailed,
+  mindmapImageDone as uiMindmapImageDone,
 } from "../../redux/slices/uiSlice";
 
 import {
@@ -20,7 +22,7 @@ import {
   clearMindmap,
 } from "../../redux/slices/mindmapSlice";
 
-import { fetchMindmap } from "../../services/api";
+import { fetchMindmap, uploadMindmapImage } from "../../services/api";
 import { useTranslation } from "react-i18next";
 
 declare global {
@@ -31,12 +33,74 @@ declare global {
 
 const activeMindmapSessions = new Set<string>();
 
+const sanitizeNode = (node: any, fallbackIndex: number = 0, seen = new Set<string>()): any => {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
+
+  // Recover id from typo keys like "id:", "id：", " id", "Id"
+  let id = node.id;
+  if (!id || typeof id !== 'string') {
+    const candidateKeys = Object.keys(node).filter(
+      k => /^[\s]*id[\s:：.]*$/i.test(k) && k !== 'id'
+    );
+    const candidate = candidateKeys.length ? node[candidateKeys[0]] : null;
+    id = (candidate && typeof candidate === 'string') ? candidate : `node_${fallbackIndex}_${Date.now()}`;
+  }
+  id = id.trim();
+
+  // Deduplicate ids — jsMind requires unique ids across the tree
+  if (seen.has(id)) {
+    id = `${id}_dup_${fallbackIndex}`;
+  }
+  seen.add(id);
+
+  // Recover topic from typo keys like "topic:", "Topic", "label", "text", "name"
+  let topic = node.topic;
+  if (!topic || typeof topic !== 'string') {
+    const topicAliases = Object.keys(node).find(
+      k => /^[\s]*(topic[\s:：.]*|label|text|title|name)[\s]*$/i.test(k) && k !== 'topic'
+    );
+    const candidate = topicAliases ? node[topicAliases] : null;
+    topic = (candidate && typeof candidate === 'string') ? candidate : id;
+  }
+  topic = topic.trim() || id;
+
+  // Truncate excessively long topics that break rendering
+  if (topic.length > 200) {
+    topic = topic.slice(0, 197) + '...';
+  }
+
+  const sanitized: any = { id, topic };
+
+  // Preserve direction if present (left/right for jsMind layout)
+  if (node.direction && typeof node.direction === 'string') {
+    sanitized.direction = node.direction;
+  }
+
+  // Recover children from typo keys like "children:", "child", "nodes", "sub"
+  let children = node.children;
+  if (!Array.isArray(children)) {
+    const childAliases = Object.keys(node).find(
+      k => /^[\s]*(children[\s:：.]*|child|nodes|sub|subtopics)[\s]*$/i.test(k) && k !== 'children'
+    );
+    children = childAliases ? node[childAliases] : undefined;
+  }
+
+  if (Array.isArray(children)) {
+    sanitized.children = children
+      .map((child: any, i: number) => sanitizeNode(child, i, seen))
+      .filter(Boolean);
+  }
+
+  return sanitized;
+};
+
 const validateJsMindData = (data: any): boolean => {
   try {
     if (!data || typeof data !== 'object') return false;
     if (!data.meta || !data.format || !data.data) return false;
     if (data.format !== 'node_tree') return false;
     if (!data.data.id || !data.data.topic) return false;
+    data.data = sanitizeNode(data.data);
     return true;
   } catch (error) {
     return false;
@@ -128,6 +192,9 @@ const MindMapTab: React.FC = () => {
   const jsmindInstance = useRef<any>(null);
   const startTimeRef = useRef<number | null>(null);
   const isInitializedRef = useRef(false);
+  // Ensures the screenshot is captured/uploaded (and the session marked complete)
+  // exactly once per session, even though renderMindmap re-runs on tab re-mounts.
+  const capturedRef = useRef(false);
 
   // Refs for values read inside the fetch effect but that must NOT be deps
   const mindmapLoadingRef = useRef(false);
@@ -273,6 +340,11 @@ const MindMapTab: React.FC = () => {
             },
           })
         );
+      } else {
+        // The report embeds the mind map as an image captured here (html2canvas)
+        // from the live jsMind view — the backend never re-renders it. Best-effort
+        // and fire-and-forget: a failure just omits the image from the report.
+        captureAndUploadMindmap();
       }
 
     } catch (error: any) {
@@ -281,6 +353,127 @@ const MindMapTab: React.FC = () => {
       dispatch(setError("Mindmap rendering failed"));
       dispatch(setRendered(true));
       dispatch(uiMindmapFailed());
+    }
+  };
+
+  // Screenshot the rendered jsMind view and upload it as the report's mind-map
+  // image. Runs once per session (capturedRef); waits a beat for the SVG lines +
+  // nodes to paint, resets the view to 1× zoom scrolled to the origin so the
+  // WHOLE map (starting at the root) is captured, then screenshots the inner
+  // canvas at jsMind's own reported layout size.
+  //
+  // We rely on jsMind's `view.size` (the full laid-out map size incl. margins)
+  // instead of measuring getBoundingClientRect() and manually translating the
+  // SVG/node layers: while the user has panned/zoomed the map, those viewport
+  // coords are offset from the layers' own coordinate space, which is what made
+  // the old capture crop the root node and look jumbled.
+  //
+  // Always dispatches mindmapImageDone (success OR failure) so report
+  // auto-generation is unblocked either way.
+  const captureAndUploadMindmap = async () => {
+    const sid = mindmapSessionIdRef.current;
+    if (capturedRef.current) return;
+    if (!sid) {
+      // No session to upload to — don't block the report waiting for an image.
+      dispatch(uiMindmapImageDone());
+      return;
+    }
+    capturedRef.current = true;
+
+    // Snapshot the current view transform so we can restore the user's pan/zoom.
+    const jm = jsmindInstance.current;
+    const inner = jsmindRef.current?.querySelector<HTMLElement>(".jsmind-inner");
+    const prevZoom = jm?.view?.zoom_current ?? 1;
+    const prevScrollLeft = inner?.scrollLeft ?? 0;
+    const prevScrollTop = inner?.scrollTop ?? 0;
+
+    // Saved so we can restore the scroll container's own box after capture.
+    let prevInnerWidth = "";
+    let prevInnerHeight = "";
+    let prevInnerOverflow = "";
+    let expanded = false;
+
+    try {
+      // Let layout/paint settle so node coordinates and connector lines are final.
+      await new Promise(resolve => setTimeout(resolve, 400));
+      await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+      await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+
+      if (!inner) throw new Error("jsMind inner element not found");
+
+      // Reset to 1× zoom and scroll to the origin so html2canvas captures from
+      // the top-left of the full map (the root node) with a stable coord system.
+      try {
+        if (jm?.view && typeof jm.view.set_zoom === "function" && prevZoom !== 1) {
+          jm.view.set_zoom(1);
+        }
+      } catch { /* zoom reset is best-effort */ }
+      inner.scrollLeft = 0;
+      inner.scrollTop = 0;
+
+      // Full laid-out map size as jsMind computed it (includes hmargin/vmargin
+      // as built-in padding). Fall back to the scroll size if unavailable.
+      const size = jm?.view?.size;
+      const targetWidth = Math.max(1, Math.ceil(size?.w || inner.scrollWidth));
+      const targetHeight = Math.max(1, Math.ceil(size?.h || inner.scrollHeight));
+
+      // .jsmind-inner is the SCROLL container: its own box is only the visible
+      // panel (width/height 100%, overflow auto), so html2canvas would clip
+      // anything past the viewport — cropping the right/bottom of a wide map.
+      // Temporarily grow its box to the full map size and expose overflow so the
+      // whole tree is inside the captured region, then restore below.
+      prevInnerWidth = inner.style.width;
+      prevInnerHeight = inner.style.height;
+      prevInnerOverflow = inner.style.overflow;
+      inner.style.width = `${targetWidth}px`;
+      inner.style.height = `${targetHeight}px`;
+      inner.style.overflow = "visible";
+      expanded = true;
+
+      await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+
+      const canvas = await html2canvas(inner, {
+        backgroundColor: "#ffffff",
+        scale: 2, // sharper image in the .docx
+        width: targetWidth,
+        height: targetHeight,
+        windowWidth: targetWidth,
+        windowHeight: targetHeight,
+        scrollX: 0,
+        scrollY: 0,
+        useCORS: true,
+      });
+
+      const blob: Blob | null = await new Promise(resolve =>
+        canvas.toBlob(resolve, "image/png")
+      );
+      if (!blob) throw new Error("Failed to encode mind-map PNG");
+
+      await uploadMindmapImage(sid, blob);
+      dispatch(uiMindmapImageDone());
+    } catch (err) {
+      // Non-fatal: the report just renders without the mind-map image. Still
+      // signal done so report auto-generation isn't blocked forever.
+      console.warn("Mind-map screenshot upload failed:", err);
+      capturedRef.current = false;  // allow a retry on a later re-render
+      dispatch(uiMindmapImageDone());
+    } finally {
+      // Restore the scroll container's own box.
+      if (inner && expanded) {
+        inner.style.width = prevInnerWidth;
+        inner.style.height = prevInnerHeight;
+        inner.style.overflow = prevInnerOverflow;
+      }
+      // Restore the user's original pan/zoom.
+      try {
+        if (jm?.view && typeof jm.view.set_zoom === "function" && prevZoom !== 1) {
+          jm.view.set_zoom(prevZoom);
+        }
+      } catch { /* best-effort */ }
+      if (inner) {
+        inner.scrollLeft = prevScrollLeft;
+        inner.scrollTop = prevScrollTop;
+      }
     }
   };
 
@@ -334,6 +527,7 @@ const MindMapTab: React.FC = () => {
   useEffect(() => {
     isInitializedRef.current = false;
     startedRef.current = false;
+    capturedRef.current = false;
   }, [sessionId]);
 
   useEffect(() => {

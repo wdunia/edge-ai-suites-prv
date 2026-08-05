@@ -1,5 +1,42 @@
 # Release Notes: Industrial Edge Insights Multimodal
 
+<!--## Version 2026.2-->
+
+<!--date TBD-->
+
+## Version 2026.1
+
+**June 2026**
+
+This release introduces **GPU/NPU hardware acceleration** support for performing inference on DL Streamer Pipeline Server,
+**new Classifier ML model for weld time series data analysis enabling support on GPU**, various fixes and documentation improvements.
+
+**New**
+
+- **GPU and NPU Support on DL Streamer Pipeline Server**: Docker Compose and Helm deployments
+  now support GPU and NPU acceleration for weld defect classification on the DL Streamer
+  Pipeline Server, with updated configuration and user guides for running inference on
+  accelerators.
+- **GPU Support on Time Series Analytics**: Docker Compose and Helm deployments now support
+  GPU acceleration for weld defect classification on the Time Series Analytics microservice, with
+  updated configuration and user guides for running inference on GPU.
+- **RTSP Camera Configuration Guide**: A new how-to guide has been added for configuring
+  an external RTSP camera as the video source for the multimodal sample app.
+- **Functional Tests**: Comprehensive functional tests for Docker Compose and Helm deployments
+  have been added.
+
+**Improved**
+
+- **New Classifier ML Model**: The weld defect detection pipeline on the Time Series Analytics
+  microservice now uses a scikit-learn's (Intel-accelerated) RandomForestClassifier model, replacing
+  the previous CatBoost model, with optional explanation payloads and updated model artifacts.
+- **UDF Package Format**: UDF sample app archives now use tar format instead of zip.
+- **Security**: Upgraded to latest available third-party versions in all applicable manifests.
+- **Documentation**: Time Series vs Multimodal Weld Defect Detection
+  distinction clarified and broken references fixed.
+
+---
+
 ## Version 2026.0
 
 **March 24, 2026**
@@ -29,7 +66,6 @@ This release introduces **S3-based frame storage**, **deployment hardening**, an
 - Documentation has been extended and improved for ease of navigation, covering updates to
   setup guides, Helm deployment, and more.
 
-
 For information on older versions, check [release notes 2025](./release-notes/release-notes-2025.md)
 
 <!--hide_directive
@@ -37,6 +73,7 @@ For information on older versions, check [release notes 2025](./release-notes/re
 :maxdepth: 5
 :hidden:
 
-release-notes/release-notes-2025.md
+Release Notes 2025 <./release-notes/release-notes-2025.md>
+
 ```
 hide_directive-->

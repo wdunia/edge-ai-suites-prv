@@ -1,5 +1,5 @@
 
-# Copyright (C) 2025 Intel Corporation
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 # --- Camera Watcher API (moved to end for formatting) ---
 
@@ -10,14 +10,21 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Body
 from pydantic import BaseModel
 from api.endpoints.frigate_api import FrigateService
 from api.endpoints.summarization_api import SummarizationService
+from api.endpoints.brokers_api import broker_router
+from api.endpoints.vss_api import vss_router
 from service.vms_service import VmsService
 from service import redis_store
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CameraWatcherRequest(BaseModel):
     cameras: List[Dict[str, bool]]
 
 router = APIRouter()
+router.include_router(broker_router)
+router.include_router(vss_router)
 frigate_service = FrigateService()
 summarization_service = SummarizationService()
 vms_service = VmsService(frigate_service, summarization_service)
@@ -116,7 +123,8 @@ async def get_search_responses(request: Request):
         return output
 
     except Exception as e:
-        return {"error": str(e)}
+        logger.error("Failed to fetch search responses: %s", e, exc_info=True)
+        return {"error": "Failed to fetch search responses. Please try again later."}
 
 
 class Rule(BaseModel):
@@ -212,8 +220,8 @@ async def get_camera_watcher_mapping(request: Request = None):
             # Merge so that any runtime changes override persisted values
             merged = {**persisted, **runtime_mapping}
     except Exception as e:
-        # Include error info but still return something useful
-        return {"mapping": merged, "warning": f"Redis load failed: {e}"}
+        logger.error("Redis load failed for camera watcher mapping: %s", e, exc_info=True)
+        return {"mapping": merged}
     return {"mapping": merged}
 
 

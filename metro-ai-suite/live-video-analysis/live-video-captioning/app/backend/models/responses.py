@@ -12,6 +12,8 @@ class RunInfo(BaseModel):
     mqttTopic: str
     status: str = "running"
     modelName: Optional[str] = None
+    vlmDevice: Optional[str] = None
+    detectionDevice: Optional[str] = None
     pipelineName: Optional[str] = None
     runName: Optional[str] = None
     prompt: Optional[str] = None
@@ -23,14 +25,38 @@ class RunInfo(BaseModel):
     frameHeight: Optional[int] = None
 
 
+class ModelInfo(BaseModel):
+    name: str
+    device: Literal["cpu", "gpu", "npu"]
+
+
 class ModelList(BaseModel):
-    models: list[str]
+    models: list[ModelInfo]
+
+
+class DetectionModelList(BaseModel):
+    models: List[str]
 
 
 class PipelineInfo(BaseModel):
     pipeline_name: str
+    pipeline_display_name: Optional[str] = None
     pipeline_type: Literal["detection", "non-detection"]
+    pipeline_default: bool = False
+    device: Literal["cpu", "gpu", "npu", "any"] = "any"
 
 
 class PipelineInfoList(BaseModel):
     pipelines: List[PipelineInfo]
+
+
+class CameraDevice(BaseModel):
+    device_path: str
+    device_name: Optional[str] = None
+    pixel_formats: List[str]
+    usable_formats: List[str]
+    has_usable_format: bool
+
+
+class CameraDeviceList(BaseModel):
+    cameras: List[CameraDevice]

@@ -3,27 +3,48 @@
 
 import logging
 import os
+import threading
 from collections import defaultdict
 from pathlib import Path
 
 import math
 
-import torch
-from optimum.intel import OVModelForSequenceClassification
-from transformers import AutoTokenizer
+import openvino_genai as ov_genai
 
 from providers.file_ingest_and_retrieve.utils import extract_bucket_name, file_key_to_path
+from providers.utils.model_utils import is_model_ready, resolve_model_max_length
 
 logger = logging.getLogger(__name__)
 
 RRF_K = 60  # RRF constant — higher means scores drop off more slowly with rank, increasing diversity
 
-# Sigmoid parameters for visual score rescaling: sigmoid(k * (sim - center)) * 100.
-# Text→image and image→image have very different similarity distributions, so each
-# query type needs its own center.
-VISUAL_SIGMOID_K = 15.0               # steepness (shared)
-VISUAL_SIGMOID_CENTER_TEXT = 0.15     # text→image: CLIP sim clusters ~0.05–0.35
-VISUAL_SIGMOID_CENTER_IMAGE = 0.70   # image→image: CLIP sim clusters ~0.5–0.95
+# Upper bound on documents returned by the rerank pipeline. TextRerankPipeline
+# defaults top_n=3, which would silently truncate candidates; set it high so
+# every candidate is scored and kept (matches the previous score-all behaviour).
+_RERANK_TOP_N = 10_000
+
+
+def _score_to_reranker_score(score: float, scores_are_probabilities: bool) -> float:
+    """Map a rerank score onto the logit scale expected downstream.
+
+    ``_compute_percentage_scores`` applies ``sigmoid(reranker_score)`` to derive
+    the 0-100 relevance score, and the previous implementation stored the raw
+    cross-encoder logit. ``TextRerankPipeline`` may instead return a normalized
+    probability in [0, 1]; if so, convert it back to a logit so the downstream
+    sigmoid recovers the same percentage. If the pipeline already returns logits
+    (values outside [0, 1]), use them directly.
+    """
+    if not scores_are_probabilities:
+        return float(score)
+    eps = 1e-6
+    s = min(max(float(score), eps), 1.0 - eps)
+    return math.log(s / (1.0 - s))
+
+# Sigmoid params for visual score rescaling, calibrated on xlm-roberta-base-ViT-B-32.
+VISUAL_SIGMOID_K_TEXT = 18.7          # text→image
+VISUAL_SIGMOID_CENTER_TEXT = 0.14
+VISUAL_SIGMOID_K_IMAGE = 8.1          # image→image
+VISUAL_SIGMOID_CENTER_IMAGE = 0.52
 
 
 def _flatten_chroma_results(chroma_results: dict) -> list[dict]:
@@ -46,29 +67,32 @@ class PostProcessor:
                  document_collection_name: str = ""):
         self.dedup_time_threshold = dedup_time_threshold
         self.overfetch_multiplier = overfetch_multiplier
-        self.video_summary_id_map = video_summary_id_map or {}
+        self.video_summary_id_map = video_summary_id_map if video_summary_id_map is not None else {}
         self.chroma_client = chroma_client
         self.document_collection_name = document_collection_name
 
         local_path = Path(os.getcwd()).parent / "models" / "openvino" / reranker_model
-        if local_path.exists():
-            logger.info(f"Loading reranker OV IR from {local_path}")
-            self.tokenizer = AutoTokenizer.from_pretrained(str(local_path))
-            self.reranker_model = OVModelForSequenceClassification.from_pretrained(str(local_path), device=device)
-        else:
+        if not is_model_ready(local_path):
+            from components.vlm.vlm_openvino_serving.utils.utils import convert_model
+
             logger.info(f"Converting reranker model {reranker_model} to OV IR and saving to {local_path}")
-            self.tokenizer = AutoTokenizer.from_pretrained(reranker_model)
-            self.reranker_model = OVModelForSequenceClassification.from_pretrained(reranker_model, export=True, device=device)
-            local_path.mkdir(parents=True, exist_ok=True)
-            self.tokenizer.save_pretrained(str(local_path))
-            self.reranker_model.save_pretrained(str(local_path))
+            convert_model(reranker_model, str(local_path), model_type="reranker")
+        logger.info(f"Loading reranker OV IR from {local_path}")
+        rerank_config = ov_genai.TextRerankPipeline.Config()
+        rerank_config.top_n = _RERANK_TOP_N
+        # Cap tokenization to the cross-encoder's context length so a long
+        # query+document pair is truncated rather than overflowing the fixed
+        # position-embedding table ("Eltwise shape infer ... mismatch").
+        rerank_config.max_length = resolve_model_max_length(local_path)
+        self.reranker_pipe = ov_genai.TextRerankPipeline(str(local_path), device.upper(), rerank_config)
+        self._rerank_lock = threading.Lock()
         logger.info(f"Reranker model '{reranker_model}' loaded successfully on device '{device}'.")
 
 
     def process_text_query_results(
         self, query: str, visual_results: dict, doc_results: dict, top_k: int,
     ) -> dict:
-        """Full post-processing for text queries: dedup → attach summaries → rerank → scores → drop attached summaries → allocate slots → summary to video → format."""
+        """Full post-processing for text queries: dedup → attach summaries → rerank → scores → allocate slots → drop duplicate summaries → summary to video → format."""
         visual_flat = _flatten_chroma_results(visual_results)
         doc_flat = _flatten_chroma_results(doc_results)
         logger.debug("[PostProcessor] Text query: %r | visual candidates: %d | doc candidates: %d | top_k: %d",
@@ -85,15 +109,17 @@ class PostProcessor:
         self._compute_percentage_scores(visual_deduped)
         self._compute_percentage_scores(doc_reranked)
 
-        doc_filtered = self._remove_attached_summaries(doc_reranked, visual_deduped)
-
         groups = {}
         if visual_deduped:
             groups["visual"] = visual_deduped
-        if doc_filtered:
-            groups["document"] = doc_filtered
+        if doc_reranked:
+            groups["document"] = doc_reranked
 
         merged = self._allocate_slots(groups, top_k)
+        # Remove duplicate summaries AFTER slot allocation so that summaries
+        # whose video frames didn't make top_k are preserved (and later
+        # converted to video results by _convert_summaries_to_video).
+        merged = self._remove_attached_summaries_from_final(merged)
         self._convert_summaries_to_video(merged)
         logger.debug("[PostProcessor] Final merged results: %d", len(merged))
         return self._to_chroma_format(merged)
@@ -113,7 +139,7 @@ class PostProcessor:
         # Assign RRF scores by rank so distances field is consistent with text query path (higher = better)
         for rank, item in enumerate(trimmed):
             item["rrf_score"] = 1.0 / (RRF_K + rank)
-        self._compute_percentage_scores(trimmed, visual_sigmoid_center=VISUAL_SIGMOID_CENTER_IMAGE)
+        self._compute_percentage_scores(trimmed, visual_sigmoid_k=VISUAL_SIGMOID_K_IMAGE, visual_sigmoid_center=VISUAL_SIGMOID_CENTER_IMAGE)
         return self._to_chroma_format(trimmed)
 
 
@@ -193,7 +219,6 @@ class PostProcessor:
         for file_path, video_results in video_results_by_file.items():
             summary_ids = self.video_summary_id_map.get(file_path, [])
             if not summary_ids:
-                logger.debug("[summary] No summaries found for %s", file_path)
                 continue
 
             summaries = self.chroma_client.get(
@@ -233,22 +258,30 @@ class PostProcessor:
         return best
 
     @staticmethod
-    def _remove_attached_summaries(doc_results: list[dict], visual_results: list[dict]) -> list[dict]:
-        """Remove summaries whose chunk_text is already attached to a visual frame."""
+    def _remove_attached_summaries_from_final(results: list[dict]) -> list[dict]:
+        """Remove summaries that duplicate a visual frame already in the final results.
+
+        Only summaries whose chunk_text matches a summary_text attached to a
+        selected visual frame are removed.  This must run AFTER slot allocation
+        so summaries whose video frames didn't make the cut stay in the list
+        (they'll be converted to video results by _convert_summaries_to_video).
+        """
         attached_texts = {
             r["meta"].get("summary_text", "")
-            for r in visual_results
-            if r.get("meta", {}).get("summary_text")
+            for r in results
+            if r.get("meta", {}).get("type") == "video" and r.get("meta", {}).get("summary_text")
         }
+        if not attached_texts:
+            return results
         filtered = []
         removed_count = 0
-        for r in doc_results:
+        for r in results:
             if "summary_key" in r.get("meta", {}) and r["meta"].get("chunk_text", "") in attached_texts:
                 removed_count += 1
             else:
                 filtered.append(r)
         if removed_count:
-            logger.debug("[PostProcessor] Removed %d attached summaries from doc group", removed_count)
+            logger.debug("[PostProcessor] Removed %d duplicate summaries from final results", removed_count)
         return filtered
 
     @staticmethod
@@ -276,6 +309,7 @@ class PostProcessor:
             end_time = meta.get("end_time", 0)
             mid_time = start_time + (end_time - start_time) / 2
             r["meta"] = {
+                **meta,
                 "file_path": video_fp,
                 "type": "video",
                 "original_type": "constructed_from_summary",
@@ -293,7 +327,7 @@ class PostProcessor:
                          converted_count, len(remove_indices))
 
     def _rerank_documents(self, query: str, doc_results: list[dict]) -> list[dict]:
-        """Re-score documents with BAAI/bge-reranker-large cross-encoder.
+        """Re-score documents with cross-encoder reranker.
 
         Documents missing ``chunk_text`` in metadata are kept at their
         original rank position but do not receive a reranker score.
@@ -312,19 +346,21 @@ class PostProcessor:
                 without_text.append((idx, r))
 
         if with_text:
-            pairs = [[query, r["meta"]["chunk_text"]] for _, r in with_text]
-            logger.debug("[rerank] Scoring %d doc pairs with cross-encoder", len(pairs))
-            inputs = self.tokenizer(
-                pairs, padding=True, truncation=True, max_length=512, return_tensors="pt",
-            )
-            with torch.no_grad():
-                logits = self.reranker_model(**inputs).logits.squeeze(-1)
-            scores = logits.float().cpu().tolist()
-            if isinstance(scores, float):
-                scores = [scores]
+            texts = [r["meta"]["chunk_text"] for _, r in with_text]
+            logger.debug("[rerank] Scoring %d doc pairs with cross-encoder", len(texts))
+            with self._rerank_lock:
+                ranked = self.reranker_pipe.rerank(query, texts)
 
-            for score, (_, r) in zip(scores, with_text):
-                r["reranker_score"] = score
+            raw_scores = [score for _, score in ranked]
+            # bge-style rerankers return a normalized probability in [0, 1];
+            # detect that so we can restore the logit scale the downstream
+            # sigmoid expects (see _score_to_reranker_score).
+            scores_are_probabilities = bool(raw_scores) and all(
+                0.0 <= s <= 1.0 for s in raw_scores
+            )
+            for text_idx, score in ranked:
+                _, r = with_text[text_idx]
+                r["reranker_score"] = _score_to_reranker_score(score, scores_are_probabilities)
 
             # Sort by reranker score descending
             with_text.sort(key=lambda x: x[1]["reranker_score"], reverse=True)
@@ -417,19 +453,27 @@ class PostProcessor:
 
 
     @staticmethod
-    def _compute_percentage_scores(results: list[dict], visual_sigmoid_center: float = VISUAL_SIGMOID_CENTER_TEXT) -> None:
-        """Compute a 0-100% absolute relevance score for each result in-place.
-
-        - Documents (reranker_score present): sigmoid(reranker_score) * 100
-        - Visual (no reranker_score): sigmoid(k * (cosine_sim - center)) * 100
-          where cosine_sim = 1 - distance (ChromaDB cosine distance in [0, 2])
-        """
+    def _compute_percentage_scores(
+        results: list[dict],
+        visual_sigmoid_k: float = VISUAL_SIGMOID_K_TEXT,
+        visual_sigmoid_center: float = VISUAL_SIGMOID_CENTER_TEXT,
+    ) -> None:
+        """Assign 0-100 relevance score: sigmoid(reranker logit) for docs, sigmoid(k*(sim-center)) for visual."""
         for r in results:
             if r.get("reranker_score") is not None:
+                if not math.isfinite(r["reranker_score"]):
+                    logger.warning("[reranker] Non-finite reranker_score for id=%s, defaulting to 0", r.get("id"))
+                    r["score"] = 0.0
+                    continue
                 r["score"] = round(1.0 / (1.0 + math.exp(-r["reranker_score"])) * 100, 2)
             else:
-                similarity = 1.0 - r["distance"]
-                r["score"] = round(1.0 / (1.0 + math.exp(-VISUAL_SIGMOID_K * (similarity - visual_sigmoid_center))) * 100, 2)
+                distance = r["distance"]
+                if not math.isfinite(distance):
+                    logger.warning("[reranker] Non-finite distance for id=%s, defaulting to 0", r.get("id"))
+                    r["score"] = 0.0
+                    continue
+                similarity = 1.0 - distance
+                r["score"] = round(1.0 / (1.0 + math.exp(-visual_sigmoid_k * (similarity - visual_sigmoid_center))) * 100, 2)
 
     @staticmethod
     def _to_chroma_format(results: list[dict]) -> dict:

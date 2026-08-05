@@ -6,6 +6,7 @@ import folderIcon from "../../assets/images/folder.svg";
 import streamingIcon from "../../assets/images/streamingIcon.svg";
 import cameraIcon from "../../assets/images/camera-icon.svg";
 import { formatSecondsToTime } from "../../utils/timeUtils";
+import { getContentSearchFileUrl } from "../../services/api";
 
 // Content Search API types
 export interface CsSearchParams {
@@ -20,6 +21,10 @@ export interface CsSearchResultMeta {
   file_path?: string;
   type?: string;
   video_pin_second?: number;
+  video_start_second?: number;
+  video_end_second?: number;
+  summary_text?: string;
+  chunk_text?: string;
   doc_page_number?: number;
   tags?: string[];
   doc_filetype?: string;
@@ -38,6 +43,7 @@ type ResultTab = "all" | "document" | "image" | "video";
 
 interface ResultSectionProps {
   results: SearchResult[];
+  error?: string | null;
 }
 
 function getFileName(result: SearchResult): string {
@@ -48,7 +54,7 @@ function getFileName(result: SearchResult): string {
   return "Unknown";
 }
 
-const ResultSection: React.FC<ResultSectionProps> = ({ results }) => {
+const ResultSection: React.FC<ResultSectionProps> = ({ results, error }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ResultTab>("all");
 
@@ -98,14 +104,19 @@ const ResultSection: React.FC<ResultSectionProps> = ({ results }) => {
       </div>
 
       <div className="cs-result-grid">
-        {filteredResults.length === 0 ? (
+        {error ? (
+          <div className="cs-result-empty cs-result-error">
+            <span className="cs-result-error-title">{t("resultSection.backendUnavailable")}</span>
+            <span className="cs-result-empty-hint">{t("resultSection.backendUnavailableHint")}</span>
+          </div>
+        ) : filteredResults.length === 0 ? (
           <div className="cs-result-empty">
-            <img 
-              src={searchIcon} 
-              alt="search" 
-              className="cs-result-empty-icon" 
-              width="48" 
-              height="48" 
+            <img
+              src={searchIcon}
+              alt="search"
+              className="cs-result-empty-icon"
+              width="48"
+              height="48"
             />
             <span className="cs-result-empty-title">{t("resultSection.noResults")}</span>
             <span className="cs-result-empty-hint">{t("resultSection.noResultsHint")}</span>
@@ -123,18 +134,21 @@ const ResultSection: React.FC<ResultSectionProps> = ({ results }) => {
 const ResultCard: React.FC<{ result: SearchResult }> = ({ result }) => {
   const { t } = useTranslation();
   const [imageError, setImageError] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const meta = result?.meta || {};
   const fileName = meta.file_name || getFileName(result);
   const tags = Array.isArray(meta.tags) ? meta.tags : [];
   const fileType = meta.type;
   const filePath = meta.file_path;
+  const isIndependentText = !meta.file_name && fileType === "document";
 
   const renderPreview = () => {
-    // For image type with valid file path, try to show the image
+    // For image type, build the HTTP URL from the local:// path and try to display it
     if (fileType === "image" && filePath && !imageError) {
+      const imgSrc = getContentSearchFileUrl(filePath);
       return (
         <img
-          src={filePath}
+          src={imgSrc}
           alt={fileName}
           className="cs-result-item-thumbnail"
           onError={() => setImageError(true)}
@@ -164,19 +178,66 @@ const ResultCard: React.FC<{ result: SearchResult }> = ({ result }) => {
       </div>
 
       <div className="cs-result-item-content">
-        <div className="cs-result-item-row">
-          <span className="cs-result-item-value" title={fileName}>{fileName}</span>
-        </div>
-
-        {fileType === "document" && (
-          <div className="cs-result-item-row">
-            <span className="cs-result-item-page-label">Page: {meta.doc_page_number ?? "NA"}</span>
+        {isIndependentText ? (
+          <div className="cs-result-item-summary">
+            <p className={`cs-result-item-summary-text${summaryExpanded ? " cs-result-item-summary-text--expanded" : ""}`}>
+              <span className="cs-result-item-summary-label">Raw Text: </span>
+              {meta.chunk_text}
+            </p>
+            <button
+              className="cs-result-item-summary-toggle"
+              onClick={() => setSummaryExpanded((prev) => !prev)}
+            >
+              {summaryExpanded ? t("resultSection.showLess") : t("resultSection.showMore")}
+            </button>
           </div>
+        ) : (
+          <>
+            <div className="cs-result-item-row">
+              <span className="cs-result-item-value" title={fileName}>{fileName}</span>
+            </div>
+
+            {fileType === "document" && (
+              <div className="cs-result-item-row">
+                <span className="cs-result-item-page-label">Page: {meta.doc_page_number ?? "NA"}</span>
+              </div>
+            )}
+
+            {fileType === "document" && meta.chunk_text && (
+              <div className="cs-result-item-summary">
+                <p className={`cs-result-item-summary-text${summaryExpanded ? " cs-result-item-summary-text--expanded" : ""}`}>
+                  <span className="cs-result-item-summary-label">Raw Text: </span>
+                  {meta.chunk_text}
+                </p>
+                <button
+                  className="cs-result-item-summary-toggle"
+                  onClick={() => setSummaryExpanded((prev) => !prev)}
+                >
+                  {summaryExpanded ? t("resultSection.showLess") : t("resultSection.showMore")}
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         {fileType === "video" && (
           <div className="cs-result-item-row">
             <span className="cs-result-item-page-label">Time: {formatSecondsToTime(meta.video_pin_second)}</span>
+          </div>
+        )}
+
+        {fileType === "video" && meta.summary_text && (
+          <div className="cs-result-item-summary">
+            <p className={`cs-result-item-summary-text${summaryExpanded ? " cs-result-item-summary-text--expanded" : ""}`}>
+              <span className="cs-result-item-summary-label">{t("resultSection.summarization")}: </span>
+              {meta.summary_text}
+            </p>
+            <button
+              className="cs-result-item-summary-toggle"
+              onClick={() => setSummaryExpanded((prev) => !prev)}
+            >
+              {summaryExpanded ? t("resultSection.showLess") : t("resultSection.showMore")}
+            </button>
           </div>
         )}
 

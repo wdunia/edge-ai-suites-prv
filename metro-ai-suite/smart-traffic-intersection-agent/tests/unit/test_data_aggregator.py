@@ -2,19 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for Data Aggregator Service."""
 
+import asyncio
 import pytest
 import os
 import sys
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from services.data_aggregator import DataAggregatorService
 from models import (
-    CameraDataMessage, CameraImage, TrafficSnapshot, IntersectionData,
-    WeatherData, VLMAnalysisData, VLMAlert
+    CameraDataMessage, CameraImage, WeatherData, VLMAnalysisData
 )
 
 
@@ -426,6 +426,60 @@ class TestTriggerVLMAnalysis:
         # Analysis should not be saved on error
         assert data_aggregator.current_vlm_analysis is None
 
+    @pytest.mark.asyncio
+    async def test_schedules_metrics_publish_after_success(self, mock_config_service, mock_vlm_service, sample_vlm_analysis):
+        """Test that successful VLM analysis publishes STIA metrics asynchronously."""
+        metrics_client = MagicMock()
+        metrics_client.build_traffic_metrics.return_value = [
+            {"name": "stia_traffic", "fields": {"total_density": 5}, "tags": {}}
+        ]
+        metrics_client.publish_batch = AsyncMock()
+        aggregator = DataAggregatorService(mock_config_service, mock_vlm_service, metrics_client)
+        mock_vlm_service.analyze_traffic_non_blocking.return_value = sample_vlm_analysis
+
+        camera_data = CameraDataMessage(
+            camera_id="camera_north",
+            intersection_id="test-intersection-id",
+            direction="north",
+            vehicle_count=5,
+            pedestrian_count=2
+        )
+        aggregator.temp_camera_data["north"] = camera_data
+        await aggregator._update_temp_intersection_data()
+
+        await aggregator._trigger_vlm_analysis()
+        await asyncio.sleep(0)
+
+        metrics_client.build_traffic_metrics.assert_called_once()
+        metrics_client.publish_batch.assert_awaited_once_with(
+            [{"name": "stia_traffic", "fields": {"total_density": 5}, "tags": {}}]
+        )
+
+    @pytest.mark.asyncio
+    async def test_does_not_publish_metrics_when_vlm_fails(self, mock_config_service, mock_vlm_service):
+        """Test Metrics Manager is not called when no VLM-analyzed data is saved."""
+        metrics_client = MagicMock()
+        metrics_client.build_traffic_metrics.return_value = []
+        metrics_client.publish_batch = AsyncMock()
+        aggregator = DataAggregatorService(mock_config_service, mock_vlm_service, metrics_client)
+        mock_vlm_service.analyze_traffic_non_blocking.side_effect = Exception("VLM Error")
+
+        camera_data = CameraDataMessage(
+            camera_id="camera_north",
+            intersection_id="test-intersection-id",
+            direction="north",
+            vehicle_count=5,
+            pedestrian_count=2
+        )
+        aggregator.temp_camera_data["north"] = camera_data
+        await aggregator._update_temp_intersection_data()
+
+        await aggregator._trigger_vlm_analysis()
+        await asyncio.sleep(0)
+
+        metrics_client.build_traffic_metrics.assert_not_called()
+        metrics_client.publish_batch.assert_not_called()
+
 
 class TestGetCurrentTrafficIntelligence:
     """Test cases for get_current_traffic_intelligence method."""
@@ -535,3 +589,14 @@ class TestGetServiceStatus:
         assert data_aggregator.vlm_analyzed_weather_data is not None
         assert data_aggregator.current_vlm_analysis is not None
         assert data_aggregator.last_analysis_time > 0
+
+        status = data_aggregator.get_service_status()
+        assert status["intersection_id"] == "test-intersection-id"
+        assert status["intersection_name"] == "Test Intersection"
+        assert status["current_traffic_density"] == 5
+        assert status["current_pedestrian_count"] == 2
+        assert status["analyzed_camera_directions"] == ["north"]
+        assert status["active_analyzed_cameras"] == 1
+        assert status["has_weather_data"] is True
+        assert status["has_vlm_analysis"] is True
+        assert isinstance(status["last_analysis_time"], str)

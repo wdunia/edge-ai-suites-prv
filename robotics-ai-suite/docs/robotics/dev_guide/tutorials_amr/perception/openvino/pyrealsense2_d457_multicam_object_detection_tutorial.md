@@ -42,39 +42,36 @@ The source code of this component can be found here:
 
 Complete the [get started guide](../../../../gsg_robot/index.md) before continuing.
 
-Complete the [GMSL setup guide](../../../gmsl-guide/index.rst) before continuing.
-
-
+Complete the [GMSL setup guide](../../../gmsl-guide/configure-gmsl-serdes-acpi.md) before continuing.
 
 > **Note:** If using D457 select the "MIPI" mode of the Intel® RealSense™ Depth Camera D457 by
 > moving the select switch on the camera to "M", as shown in the picture below.
 
 ![MIPI_USB_Switch_in_D457](../../../../images/MIPI_USB_Switch_in_D457.jpeg)
 
-
-
 ### Install ``librealsense2`` and ``realsense2`` tools
 
-::::{tab-set}
-:::{tab-item} **Jazzy**
-:sync: jazzy
+<!--hide_directive::::{tab-set}hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Jazzy**
+<!--hide_directive:sync: jazzyhide_directive-->
 
 ```bash
 sudo apt install -y ros-jazzy-librealsense2-tools
 ```
 
-:::
-:::{tab-item} **Humble**
-:sync: humble
+<!--hide_directive:::hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Humble**
+<!--hide_directive:sync: humblehide_directive-->
 
 ```bash
 sudo apt install -y ros-humble-librealsense2-tools
 ```
 
-:::
-::::
+<!--hide_directive:::hide_directive-->
+<!--hide_directive::::hide_directive-->
 
-### Install UV 
+### Install UV
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -84,53 +81,73 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 ```
 
-### Load the Intel IPU Driver ###
-::::{tab-set}
-:::{tab-item} **IPU7**
-:sync: ipu7
+### Load the Intel IPU Driver
+
+<!--hide_directive::::{tab-set}hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **IPU7**
+<!--hide_directive:sync: ipu7hide_directive-->
 
 ```bash
 sudo modprobe intel-ipu7-isys
 ```
 
-:::
-:::{tab-item} **IPU6**
-:sync: ipu6
+<!--hide_directive:::hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **IPU6**
+<!--hide_directive:sync: ipu6hide_directive-->
 
 ```bash
 sudo modprobe intel-ipu6-isys
 ```
 
-:::
-::::
+<!--hide_directive:::hide_directive-->
+<!--hide_directive::::hide_directive-->
 
 ## Install and run multi-camera object detection tutorial using the Intel® RealSense™ Depth Camera D457
 
 ### Install
 
-Install the multi-camera object detection tutorial by using the following command.
+Install the multi-camera object detection tutorial by using the following command:
 
-::::{tab-set}
-:::{tab-item} **Jazzy**
-:sync: jazzy
+<!--hide_directive::::{tab-set}hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Jazzy**
+<!--hide_directive:sync: jazzyhide_directive-->
 
 ```bash
 sudo apt install -y ros-jazzy-pyrealsense2-ai-demo
 ```
 
-:::
-:::{tab-item} **Humble**
-:sync: humble
+<!--hide_directive:::hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Humble**
+<!--hide_directive:sync: humblehide_directive-->
 
 ```bash
 sudo apt install -y ros-humble-pyrealsense2-ai-demo
 ```
 
-:::
-::::
+<!--hide_directive:::hide_directive-->
+<!--hide_directive::::hide_directive-->
 
 ### Setup uv venv
-Go to /opt/ros/`ros-distro`/share/pyrealsense2-ai-demo
+
+<!--hide_directive::::{tab-set}hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Jazzy**
+<!--hide_directive:sync: jazzyhide_directive-->
+
+```bash
+cd /opt/ros/jazzy/share/pyrealsense2-ai-demo
+```
+
+<!--hide_directive:::hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Humble**
+<!--hide_directive:sync: humblehide_directive-->
+
+```bash
+cd /opt/ros/humble/share/pyrealsense2-ai-demo
+```
+
+<!--hide_directive:::hide_directive-->
+<!--hide_directive::::hide_directive-->
+
 
 ```bash
 uv sync
@@ -145,14 +162,13 @@ source .venv/bin/activate
 
 This will take couple minutes
 
-
 ### Run the tutorial
 
 Run the below commands to start the tutorial.
 
-::::{tab-set}
-:::{tab-item} **Jazzy**
-:sync: jazzy
+<!--hide_directive::::{tab-set}hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Jazzy**
+<!--hide_directive:sync: jazzyhide_directive-->
 
 ```bash
 cd /opt/ros/jazzy/share/pyrealsense2-ai-demo
@@ -160,38 +176,12 @@ cd /opt/ros/jazzy/share/pyrealsense2-ai-demo
 source /opt/ros/jazzy/setup.bash
 ```
 
-**D457:**
-
 ```bash
-# Run the pyrealsense2-ai-demo tutorial for four camera input streams
-uv run src/pyrealsense2_ai_demo_launcher.py --config=config/config_ros2_v4l2_rs-color-0_3.js
+source /opt/intel/oneapi/setvars.sh
 ```
 
-**D3CMCXXX-115-084:**
+**Realsense/D457:**
 
-```bash
-# Run the pyrealsense2-ai-demo tutorial for four camera input streams
-uv run src/pyrealsense2_ai_demo_launcher.py --config=config/config_isx031_4cameras.js
-```
-
-:::
-:::{tab-item} **Humble**
-:sync: humble
-
-```bash
-# Source the ros2 humble
-source /opt/ros/humble/setup.bash
-
-# Run the pyrealsense2-ai-demo tutorial for four camera input streams (you might have to change the config to match to the correct /dev/video*)
-uv run src/pyrealsense2_ai_demo_launcher.py --config=config/config_ros2_v4l2_rs-color-0_3.js
-```
-
-:::
-::::
-
-All the four cameras are started after approximately 15-20 secs, as shown in the below picture.
-
-![multicam_demo_SDK2.2_1](../../../../images/multicam_demo_SDK2.2_1.png)
 
 > **Note**
 > The different config files can be used to select the number of cameras from
@@ -201,6 +191,51 @@ All the four cameras are started after approximately 15-20 secs, as shown in the
 > - ``config_ros2_v4l2_rs-color-0_1.js`` config file to run the tutorial with two cameras
 > - ``config_ros2_v4l2_rs-color-0_2.js`` config file to run the tutorial with three cameras
 > - ``config_ros2_v4l2_rs-color-0_3.js`` config file to run the tutorial with four cameras
+
+
+RealSense cameras present various sensor streams in `/dev`. It is necessary to select which sensor stream to use with the application. In this example, we will use the single camera stream ``config_ros2_v4l2_rs-color-0.js`` configuration and update the field `source:	"/dev/video-rs-color-0"` to select the YUYV stream from the connected RealSense camera.
+
+```bash
+rgb_video_devices=($(for dev in /dev/v4l/by-id/*; do v4l2-ctl -d "${dev}" --list-formats | grep -q 'YUYV' && readlink -f "${dev}"; done))
+echo "Detected video devices: ${rgb_video_devices[@]}"
+cat ./config/config_ros2_v4l2_rs-color-0.js | tail -n +5 | jq '.[0].source = "'"${rgb_video_devices[0]}"'"' > ./config/config_camera.json
+```
+
+```bash
+# Run the pyrealsense2-ai-demo tutorial for four camera input streams
+uv run src/pyrealsense2_ai_demo_launcher.py --config=config/config_camera.json
+```
+
+**D3CMCXXX-115-084:**
+
+```bash
+# Run the pyrealsense2-ai-demo tutorial for four camera input streams
+uv run src/pyrealsense2_ai_demo_launcher.py --config=config/config_isx031_4cameras.js
+```
+
+<!--hide_directive:::hide_directive-->
+<!--hide_directive:::{tab-item}hide_directive--> **Humble**
+<!--hide_directive:sync: humblehide_directive-->
+
+```bash
+source /opt/intel/oneapi/setvars.sh
+```
+
+```bash
+# Source the ros2 humble
+source /opt/ros/humble/setup.bash
+
+# Run the pyrealsense2-ai-demo tutorial for four camera input streams (you might have to change the config to match to the correct /dev/video*)
+uv run src/pyrealsense2_ai_demo_launcher.py --config=config/config_ros2_v4l2_rs-color-0_3.js
+```
+
+<!--hide_directive:::hide_directive-->
+<!--hide_directive::::hide_directive-->
+
+All the four cameras are started after approximately 15-20 secs, as shown in the below picture.
+
+![multicam_demo_SDK2.2_1](../../../../images/multicam_demo_SDK2.2_1.png)
+
 
 ## Troubleshooting and workarounds
 

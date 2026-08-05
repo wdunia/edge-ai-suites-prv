@@ -5,8 +5,8 @@
 # These contents may have been developed with support from one or more
 # Intel-operated generative artificial intelligence solutions.
 """
-analyze_trigger_latency.py  —  Trigger-based node latency analysis  (v2)
-=========================================================================
+analyze_trigger_latency.py — Trigger-based node latency analysis (v2).
+
 For each node in the ROS2 graph this script identifies the *trigger*: the
 last input message received on any subscribed topic before each output
 message was emitted.  It then computes the time delta from that trigger to
@@ -39,6 +39,9 @@ Usage
   # save per-event CSV + optional plot
   uv run python src/analyze_trigger_latency.py --export-csv --plot
 
+  # write flat KPI CSV (one row per input→output pair)
+  uv run python src/analyze_trigger_latency.py --csv-out kpi_pairs.csv
+
   # suppress internal/bookkeeping topics
   uv run python src/analyze_trigger_latency.py --no-filter
 """
@@ -50,6 +53,7 @@ import bisect
 import csv
 import datetime
 import json
+import os
 import platform
 import re
 import socket
@@ -58,6 +62,14 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Optional wandering-specific latency extraction (sibling module)
+try:
+    from wandering_metrics import extract_goal_calc_latency as _extract_goal_calc_latency
+    from wandering_metrics import extract_goal_response_latency as _extract_goal_response_latency
+except ImportError:  # pragma: no cover
+    _extract_goal_calc_latency = None  # type: ignore[assignment]
+    _extract_goal_response_latency = None  # type: ignore[assignment]
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Internal topic filter  (bookkeeping / action plumbing / ROS2 internals)
@@ -134,6 +146,13 @@ def load_topic_timestamps_from_bag(bag_dir: Path) -> Dict[str, List[float]]:
         storage_opts   = rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id=storage_id)
         converter_opts = rosbag2_py.ConverterOptions('', '')
         reader.open(storage_opts, converter_opts)
+        # Avoid MCAP warning "attempted to read in receive timestamp order with
+        # no message index". Recorded timestamps are correct for latency analysis
+        # and do not require a per-message index in the bag.
+        if hasattr(rosbag2_py, 'ReadOrder') and hasattr(rosbag2_py, 'ReadOrderSortBy'):
+            _order = rosbag2_py.ReadOrder()
+            _order.sort_by = rosbag2_py.ReadOrderSortBy.PublishedTimestamp
+            reader.set_read_order(_order)
         topic_times: Dict[str, List[float]] = defaultdict(list)
         while reader.has_next():
             topic_name, _data, ts_ns = reader.read_next()
@@ -194,6 +213,7 @@ def _compute_topic_fps(topic_times: Dict[str, List[float]]) -> Dict[str, float]:
 def find_trigger(out_ts: float, in_times: List[float]) -> Optional[float]:
     """
     Return the most-recent input timestamp that is <= out_ts, or None.
+
     Binary search via bisect for O(log n).
     """
     idx = bisect.bisect_right(in_times, out_ts) - 1
@@ -209,8 +229,7 @@ def analyze_node(
     max_latency_ms: float = 10_000.0,
 ) -> List[dict]:
     """
-    Compute trigger-based latency for every (input_topic, output_topic) pair
-    for this node.
+    Compute trigger-based latency for every (input_topic, output_topic) pair.
 
     Returns a list of result dicts, one per (in_topic, out_topic) pair that
     has at least 5 valid samples.
@@ -318,6 +337,7 @@ def _health(mean_ms: float) -> str:
 
 
 def print_results(all_results: List[dict], node_filter: Optional[str] = None) -> None:
+    """Print detailed per-node trigger latency results."""
     if not all_results:
         print('No trigger-based latency data found (need ≥5 samples per pair).')
         return
@@ -356,7 +376,7 @@ def print_results(all_results: List[dict], node_filter: Optional[str] = None) ->
                 name_trunc = p['input'][-47:] if len(p['input']) > 47 else p['input']
                 # body: 1+47+1+5 + 1+9×5 + 6 = 106 chars (no emoji — avoids wide-char padding skew)
                 # Full row display: ║  (3) + emoji(2) + body(106) + ║(1) = 112 = box width ✓
-                body = (f" {name_trunc:<47} "
+                body = (f' {name_trunc:<47} '
                         f"{p['n']:>5} "
                         f"{p['mean_ms']:>6.1f}ms "
                         f"{p['p50_ms']:>6.1f}ms "
@@ -376,8 +396,9 @@ def print_results(all_results: List[dict], node_filter: Optional[str] = None) ->
 
 def export_events_csv(all_results: List[dict], out_path: Path) -> None:
     """
-    Write a flat CSV with one row per output-message event, showing the
-    winning (closest) trigger input and all competing input latencies.
+    Write a flat CSV with one row per output-message event.
+
+    Shows the winning (closest) trigger input and all competing input latencies.
     """
     # Collect all unique input topics to make dynamic columns
     all_in_topics: set = set()
@@ -445,7 +466,7 @@ def print_summary_table(all_results: List[dict]) -> None:
         nd = r['node'].split('/')[-1][:28]
         inp = r['input'][-31:] if len(r['input']) > 31 else r['input']
         out = r['output'][-27:] if len(r['output']) > 27 else r['output']
-        print(f"  {i:>3}  {h} {nd:<28} {inp:<32} {out:<28} "
+        print(f'  {i:>3}  {h} {nd:<28} {inp:<32} {out:<28} '
               f"{r['mean_ms']:>6.1f}ms {r['p90_ms']:>6.1f}ms {r['trigger_count']:>6}")
     print('━' * 110)
     if len(ranked) > 30:
@@ -463,10 +484,11 @@ def plot_trigger_timeline(
     show: bool = True,
 ) -> None:
     """
-    For each selected node, draw a gantt-style timeline:
-      - Each output topic = one swimlane
-      - For each output event, a horizontal bar from trigger_ts to out_ts
-        coloured by which input topic triggered it.
+    For each selected node, draw a gantt-style timeline.
+
+    - Each output topic = one swimlane.
+    - For each output event, a horizontal bar from trigger_ts to out_ts
+      coloured by which input topic triggered it.
     """
     try:
         import matplotlib.pyplot as plt
@@ -575,8 +597,358 @@ def find_latest_session(sessions_root: Path) -> Optional[Path]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  Structured KPI output (standard benchmark format)
+#  Hardware / provenance helpers
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _framework_version() -> str:
+    """Read the framework version from pyproject.toml, fall back to 'unknown'."""
+    try:
+        import importlib.metadata
+        return importlib.metadata.version('ros2-kpi')
+    except Exception:
+        pass
+    try:
+        import re as _re
+        _pyproject = Path(__file__).resolve().parent.parent / 'pyproject.toml'
+        text = _pyproject.read_text()
+        m = _re.search(r'^version\s*=\s*"([^"]+)"', text, _re.MULTILINE)
+        return m.group(1) if m else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _cpu_model() -> str:
+    """Return the CPU model string from /proc/cpuinfo, or platform fallback."""
+    try:
+        with open('/proc/cpuinfo') as f:
+            for line in f:
+                if line.startswith('model name'):
+                    return line.split(':', 1)[1].strip()
+    except Exception:
+        pass
+    return platform.processor() or 'unknown'
+
+
+def _gpu_model() -> Optional[str]:
+    """Detect GPU model via lspci (best-effort, returns None if unavailable)."""
+    try:
+        import subprocess as _sp
+        out = _sp.run(
+            ['lspci', '-mm'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        for line in out.splitlines():
+            low = line.lower()
+            if 'vga' in low or '3d controller' in low or 'display' in low:
+                # lspci -mm: fields are tab/quote separated; extract the device field
+                parts = [p.strip().strip('"') for p in line.split('"') if p.strip().strip('"')]
+                if len(parts) >= 3:
+                    return parts[2]
+                return line.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _total_ram_gb() -> Optional[float]:
+    """Return total system RAM in GiB via psutil, or None."""
+    try:
+        import psutil
+        return round(psutil.virtual_memory().total / (1024 ** 3), 2)
+    except Exception:
+        return None
+
+
+def _hardware_info() -> dict:
+    """Collect hardware provenance fields for the metadata block."""
+    return {
+        'cpu_model':   _cpu_model(),
+        'cpu_cores':   os.cpu_count(),
+        'gpu_model':   _gpu_model(),
+        'total_ram_gb': _total_ram_gb(),
+    }
+
+
+def _read_cpu_thermal_sysfs() -> dict:
+    """
+    Read CPU package temperature and throttle state from local sysfs.
+
+    Temperature source: the ``x86_pkg_temp`` thermal zone under
+    ``/sys/class/thermal/thermal_zone*/``.
+
+    Throttle detection: compares ``scaling_cur_freq`` against
+    ``cpuinfo_max_freq`` for CPU 0; throttling is assumed when the current
+    frequency falls below 95 % of the maximum.
+
+    Returns ``{'temp_c': float|None, 'throttled': bool|None}``.
+    """
+    import glob as _glob
+
+    temp_c: Optional[float] = None
+    throttled: Optional[bool] = None
+
+    for zone_dir in sorted(_glob.glob('/sys/class/thermal/thermal_zone*')):
+        try:
+            zone_type = open(f'{zone_dir}/type').read().strip()
+            if zone_type == 'x86_pkg_temp':
+                raw = int(open(f'{zone_dir}/temp').read().strip())
+                temp_c = round(raw / 1000.0, 1)
+                break
+        except (OSError, ValueError):
+            continue
+
+    try:
+        cur = int(open('/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq').read().strip())
+        mxf = int(open('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq').read().strip())
+        throttled = cur < mxf * 0.95
+    except (OSError, ValueError):
+        throttled = None
+
+    return {'temp_c': temp_c, 'throttled': throttled}
+
+
+def _compute_resource_cpu_stats(session_dir: Path):
+    """
+    Parse ``resource_usage.log`` (pidstat format) and return
+    ``(cpu_mean_pct, cpu_max_pct)`` as percentage of total system capacity
+    (0-100), or ``(None, None)`` if the log is absent or unreadable.
+
+    pidstat lines may wrap onto a continuation line that starts with
+    whitespace; we join them before parsing.  Only TGID rows (TID == '-')
+    are summed per timestamp to avoid double-counting threads.
+    """
+    log = session_dir / 'resource_usage.log'
+    if not log.exists():
+        return None, None
+
+    try:
+        raw_lines = log.read_text(errors='replace').splitlines()
+    except OSError:
+        return None, None
+
+    num_cpus = 0
+    # Merge wrapped continuation lines into full records
+    merged: list[str] = []
+    for raw in raw_lines:
+        if not num_cpus:
+            m = re.search(r'\((\d+) CPU\)', raw)
+            if m:
+                num_cpus = int(m.group(1))
+        stripped = raw.rstrip()
+        if stripped and stripped[0] == ' ' and merged:
+            merged[-1] += stripped  # continuation
+        else:
+            merged.append(stripped)
+
+    if not num_cpus:
+        num_cpus = 1  # safe fallback
+
+    # Sum TGID CPU per timestamp
+    ts_cpu: dict = {}  # timestamp str -> total %CPU
+    _ts_re = re.compile(r'^(\d{2}:\d{2}:\d{2}(?:\s+[AP]M)?)\s+')
+    for line in merged:
+        m = _ts_re.match(line)
+        if not m:
+            continue
+        parts = line.split()
+        # Thread mode:  Time UID TGID TID %usr %system %guest %wait %CPU CPU ...
+        # TGID row: parts[2]=TGID(int), parts[3]='-' → parts[8] is %CPU
+        # Thread row: parts[2]='-', parts[3]=TID(int)
+        # PID mode:   Time UID PID %usr %system %guest %wait %CPU CPU ...
+        #             parts[2]=PID, parts[3]=%usr (float)
+        try:
+            tgid_col = parts[2]
+            tid_col  = parts[3]
+        except IndexError:
+            continue
+        if tid_col == '-':
+            # TGID aggregate row in thread mode — parts[8] is %CPU
+            try:
+                cpu_pct = float(parts[8])
+            except (ValueError, IndexError):
+                continue
+        elif tgid_col == '-':
+            # Thread row — skip to avoid double-counting
+            continue
+        elif '.' in parts[3] or not parts[3].lstrip('-').isdigit():
+            # PID-only mode — parts[7] is %CPU
+            try:
+                cpu_pct = float(parts[7])
+            except (ValueError, IndexError):
+                continue
+        else:
+            continue  # unrecognised
+        ts = parts[0]
+        ts_cpu[ts] = ts_cpu.get(ts, 0.0) + cpu_pct
+
+    if not ts_cpu:
+        return None, None
+
+    totals = list(ts_cpu.values())
+    scale = num_cpus * 100.0
+    cpu_mean = round(statistics.mean(totals) / scale * 100.0, 1)
+    cpu_max = round(max(totals) / scale * 100.0, 1)
+    return cpu_mean, cpu_max
+
+
+def _load_resource_thermal(session_dir: Path) -> dict:
+    """
+    Build a session-level thermal summary from the resource logs in *session_dir*.
+
+    Reads:
+      - ``gpu_usage.log``  - JSON-lines written by monitor_resources.monitor_gpu()
+      - ``npu_usage.log``  - JSON-lines written by monitor_resources.monitor_npu()
+      - sysfs live read    - CPU package temperature at analysis time
+
+    Returns a dict with the keys expected by the Level 1 KPI ``thermal`` section:
+      cpu_temp_c     - mean CPU package temperature (°C), or None
+      gpu_temp_c     - mean GPU temperature (°C), or None
+      npu_temp_c     - mean NPU temperature (°C), or None
+      cpu_throttled  - True if CPU throttling was observed, False/None otherwise
+      gpu_throttled  - True if GPU throttling was observed during the session
+      npu_throttled  - True/False when NPU monitoring was active (cur_freq < max_freq*0.95),
+                       None when npu_usage.log is absent
+    """
+    result: dict = {
+        'cpu_temp_c':      None,
+        'gpu_temp_c':      None,
+        'npu_temp_c':      None,
+        'cpu_throttled':   None,
+        'gpu_throttled':   None,
+        'npu_throttled':   None,
+        'cpu_pkg_power_w': None,
+    }
+
+    # ── GPU: read gpu_usage.log ──────────────────────────────────────────────
+    gpu_log = session_dir / 'gpu_usage.log'
+    if gpu_log.exists():
+        gpu_temps: List[float] = []
+        gpu_throttled_any = False
+        try:
+            for raw in gpu_log.read_text().splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get('event'):
+                    continue
+                if rec.get('temp_c') is not None:
+                    gpu_temps.append(float(rec['temp_c']))
+                if rec.get('throttled'):
+                    gpu_throttled_any = True
+        except OSError:
+            pass
+        if gpu_temps:
+            result['gpu_temp_c']    = round(statistics.mean(gpu_temps), 1)
+            result['gpu_throttled'] = gpu_throttled_any
+
+    # ── NPU: read npu_usage.log ──────────────────────────────────────────────
+    npu_log = session_dir / 'npu_usage.log'
+    if npu_log.exists():
+        npu_temps: List[float] = []
+        npu_throttled_any = False
+        try:
+            for raw in npu_log.read_text().splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get('event'):
+                    continue
+                if rec.get('temp_c') is not None:
+                    npu_temps.append(float(rec['temp_c']))
+                if rec.get('throttled'):
+                    npu_throttled_any = True
+        except OSError:
+            pass
+        if npu_temps:
+            result['npu_temp_c'] = round(statistics.mean(npu_temps), 1)
+        if npu_temps or npu_throttled_any:
+            result['npu_throttled'] = npu_throttled_any
+
+    # ── CPU: read cpu_power.log (recorded during the session) ───────────────
+    # This is accurate: throttle status was sampled live during the run.
+    # Fall back to a live sysfs snapshot only when the log is absent.
+    cpu_power_log = session_dir / 'cpu_power.log'
+    if cpu_power_log.exists():
+        power_samples: List[float] = []
+        cpu_throttled_any = False
+        cpu_temps_log: List[float] = []
+        try:
+            for raw in cpu_power_log.read_text().splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get('event'):
+                    continue
+                if rec.get('power_w') is not None:
+                    power_samples.append(float(rec['power_w']))
+                if rec.get('temp_c') is not None:
+                    cpu_temps_log.append(float(rec['temp_c']))
+                if rec.get('throttled'):
+                    cpu_throttled_any = True
+        except OSError:
+            pass
+        if power_samples:
+            result['cpu_pkg_power_w'] = round(statistics.mean(power_samples), 2)
+        if cpu_temps_log:
+            result['cpu_temp_c'] = round(statistics.mean(cpu_temps_log), 1)
+        result['cpu_throttled'] = cpu_throttled_any
+    else:
+        # Fallback: live sysfs snapshot (less accurate — post-run state)
+        try:
+            cpu_thermal = _read_cpu_thermal_sysfs()
+            result['cpu_temp_c']    = cpu_thermal.get('temp_c')
+            result['cpu_throttled'] = cpu_thermal.get('throttled')
+        except Exception:
+            pass
+
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  JSON schema validation
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _schema_path() -> Path:
+    """Return the path to the Level 1 KPI JSON schema bundled with the repo."""
+    return Path(__file__).resolve().parent.parent / 'schemas' / 'kpi_level1_v1.json'
+
+
+def validate_kpi_json(payload: dict) -> list[str]:
+    """
+    Validate *payload* against the Level 1 KPI JSON schema.
+
+    Returns a list of human-readable error strings (empty means valid).
+    Falls back gracefully when jsonschema is not installed.
+    """
+    schema_file = _schema_path()
+    if not schema_file.exists():
+        return [f'Schema file not found: {schema_file}']
+    try:
+        import jsonschema  # type: ignore
+    except ImportError:
+        return ['jsonschema not installed — skipping validation (pip install jsonschema)']
+
+    with open(schema_file) as _sf:
+        schema = json.load(_sf)
+
+    ValidatorCls = getattr(jsonschema, 'Draft202012Validator', None) or \
+        getattr(jsonschema, 'Draft7Validator', None) or \
+        jsonschema.Draft4Validator
+    validator = ValidatorCls(schema)
+    return [str(err.message) for err in sorted(validator.iter_errors(payload), key=str)]
+
 
 _PIPELINE_ORDER_ATL = ['Sensor', 'Perception', 'Planning', 'Control', 'Other']
 
@@ -655,26 +1027,45 @@ def build_performance_kpi(
             'pipeline_stage':   _classify_node(node_name),
         }
 
-    return {
+    _cpu_mean, _cpu_max = _compute_resource_cpu_stats(session_dir)
+    payload = {
+        'schema_version':   'level1_v1',
         'throughput_hz':    sys_fps,
         'mean_latency_ms':  sys_lat,
         'max_jitter_ms':    sys_jit_max,
         'min_jitter_ms':    sys_jit_min,
         'mean_jitter_ms':   sys_jit_mean,
         'jitter_stdev_ms':  sys_jit_std,
-        'cpu_mean_pct':     None,
-        'cpu_max_pct':      None,
+        'cpu_mean_pct':     _cpu_mean,
+        'cpu_max_pct':      _cpu_max,
+        'thermal':          _load_resource_thermal(session_dir),
         'per_node': per_node,
         'pairs': [{k: r[k] for k in _SCALAR_KEYS if k in r} for r in deduped],
         'metadata': {
-            'name':      session_dir.name,
-            'datetime':  datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'hostname':  socket.gethostname(),
-            'arch':      platform.machine(),
-            'os':        f'{platform.system()} {platform.release()}',
-            'data_path': str(session_dir),
+            'name':              session_dir.name,
+            'datetime':          datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'hostname':          socket.gethostname(),
+            'arch':              platform.machine(),
+            'os':                f'{platform.system()} {platform.release()}',
+            'data_path':         str(session_dir),
+            'framework_version': _framework_version(),
+            'ros_distro':        os.environ.get('ROS_DISTRO', 'unknown'),
+            'hardware':          _hardware_info(),
         },
     }
+    _log = session_dir / 'wandering_launch.log'
+    if _log.exists():
+        _log_text = _log.read_text(errors='replace')
+        if _extract_goal_calc_latency is not None:
+            _gcl = _extract_goal_calc_latency(_log_text)
+            if _gcl:
+                payload.setdefault('wandering', {})['goal_calc_latency_ms'] = _gcl
+        _bag = session_dir / 'bag'
+        if _extract_goal_response_latency is not None and _bag.exists():
+            _grl = _extract_goal_response_latency(_log_text, _bag)
+            if _grl:
+                payload.setdefault('wandering', {})['goal_response_latency_ms'] = _grl
+    return payload
 
 
 def print_performance_summary(all_results: List[dict]) -> None:
@@ -723,6 +1114,7 @@ def print_performance_summary(all_results: List[dict]) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Entry point for trigger-based node latency analysis."""
     parser = argparse.ArgumentParser(
         description='Trigger-based node latency analysis (v2)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -803,6 +1195,22 @@ def main() -> None:
         metavar='FILE',
         help='Save per-pair stats as JSON (for benchmark aggregation with aggregate_kpi.py).',
     )
+    parser.add_argument(
+        '--csv-out',
+        default=None,
+        metavar='FILE',
+        help='Write per-pair KPI results as a flat CSV (one row per node/input/output pair). '
+             'Columns: session, node, pipeline_stage, input, output, n, '
+             'mean_ms, stdev_ms, min_ms, p50_ms, p90_ms, p99_ms, max_ms, '
+             'trigger_count, fps, jitter_mean_ms, jitter_max_ms.',
+    )
+    parser.add_argument(
+        '--xlsx-out',
+        default=None,
+        metavar='FILE',
+        help='Write per-pair KPI results as an Excel workbook (.xlsx). '
+             'Same columns as --csv-out. Requires openpyxl (pip install openpyxl).',
+    )
     args = parser.parse_args()
 
     # ── Resolve data source ──────────────────────────────────────────────────
@@ -815,7 +1223,9 @@ def main() -> None:
         bag_input = Path(args.bag).resolve()
         # Accept both the bag directory AND a direct path to a .mcap/.db3 file
         bag_dir = bag_input.parent if bag_input.is_file() else bag_input
-        session_dir = bag_dir   # exports / plots land in the bag dir
+        # resource_usage.log and other session logs live in the parent of the
+        # bag directory (e.g. session_dir/bag/ → session_dir/)
+        session_dir = bag_dir.parent if (bag_dir.parent / 'resource_usage.log').exists() else bag_dir
 
         bag_files = sorted(bag_dir.glob('*.mcap')) + sorted(bag_dir.glob('*.db3'))
         if not bag_files:
@@ -931,6 +1341,81 @@ def main() -> None:
         with open(json_path, 'w') as _jf:
             json.dump(payload, _jf, indent=2)
         print(f'  KPI JSON written → {json_path}')
+        errors = validate_kpi_json(payload)
+        if errors:
+            print(f'  WARNING: KPI JSON failed schema validation ({len(errors)} error(s)):')
+            for err in errors:
+                print(f'    • {err}')
+        else:
+            print('  KPI JSON schema validation passed ✓')
+        _gcl = (payload.get('wandering') or {}).get('goal_calc_latency_ms')
+        if _gcl:
+            print(f'  Goal-calc latency    mean={_gcl["mean_ms"]:.1f}ms  '
+                  f'p90={_gcl["p90_ms"]:.1f}ms  max={_gcl["max_ms"]:.1f}ms  '
+                  f'(n={_gcl["n"]} transitions)')
+
+    # ── Tabular KPI export (CSV / Excel) ─────────────────────────────────────
+    if args.csv_out or args.xlsx_out:
+        _L1_FIELDS = [
+            'session', 'node', 'pipeline_stage', 'input', 'output',
+            'n', 'mean_ms', 'stdev_ms', 'min_ms', 'p50_ms', 'p90_ms', 'p99_ms', 'max_ms',
+            'trigger_count', 'fps', 'jitter_mean_ms', 'jitter_max_ms',
+        ]
+        _l1_rows = [
+            {
+                'session':        session_dir.name,
+                'node':           r.get('node', ''),
+                'pipeline_stage': r.get('pipeline_stage', ''),
+                'input':          r.get('input', ''),
+                'output':         r.get('output', ''),
+                'n':              r.get('n', ''),
+                'mean_ms':        r.get('mean_ms', ''),
+                'stdev_ms':       r.get('stdev_ms', ''),
+                'min_ms':         r.get('min_ms', ''),
+                'p50_ms':         r.get('p50_ms', ''),
+                'p90_ms':         r.get('p90_ms', ''),
+                'p99_ms':         r.get('p99_ms', ''),
+                'max_ms':         r.get('max_ms', ''),
+                'trigger_count':  r.get('trigger_count', ''),
+                'fps':            r.get('fps', ''),
+                'jitter_mean_ms': r.get('jitter_mean_ms', ''),
+                'jitter_max_ms':  r.get('jitter_max_ms', ''),
+            }
+            for r in all_results
+        ]
+
+        if args.csv_out:
+            csv_out_path = Path(args.csv_out)
+            csv_out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(csv_out_path, 'w', newline='') as _cf:
+                writer = csv.DictWriter(_cf, fieldnames=_L1_FIELDS, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(_l1_rows)
+            print(f'  Level 1 KPI CSV written → {csv_out_path}  ({len(_l1_rows)} rows)')
+
+        if args.xlsx_out:
+            xlsx_out_path = Path(args.xlsx_out)
+            xlsx_out_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                import openpyxl  # type: ignore
+                from openpyxl.styles import Font as _Font  # type: ignore
+                _wb = openpyxl.Workbook()
+                _ws = _wb.active
+                _ws.title = 'Level1 KPI'
+                _ws.append(_L1_FIELDS)
+                for _cell in _ws[1]:
+                    _cell.font = _Font(bold=True)
+                for _row in _l1_rows:
+                    _ws.append([_row.get(f, '') for f in _L1_FIELDS])
+                for _col in _ws.columns:
+                    _ws.column_dimensions[_col[0].column_letter].width = (
+                        max((len(str(c.value or '')) for c in _col), default=8) + 2
+                    )
+                _wb.save(xlsx_out_path)
+                print(f'  Level 1 KPI Excel written → {xlsx_out_path}  ({len(_l1_rows)} rows)')
+            except ImportError:
+                print('  WARNING: openpyxl not installed — Excel export skipped. '
+                      'Install with: pip install openpyxl', file=sys.stderr)
 
     # ── Plot ─────────────────────────────────────────────────────────────────
     if args.plot:

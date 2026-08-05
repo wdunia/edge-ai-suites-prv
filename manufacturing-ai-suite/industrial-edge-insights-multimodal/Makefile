@@ -4,17 +4,20 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-INCLUDE ?= default_INCLUDE
 HELM_REGISTRY = oci://registry-1.docker.io/intel
 MAKEFLAGS += --no-print-directory
 
 DOCKER_COMPOSE_FILE = ./docker-compose.yml
-DOCKER_COMPOSE_VALIDATION_FILE=./docker-compose-validation.override.yml
+DOCKER_COMPOSE_FILE_VLLM = ./docker-compose-vllm.yml
+DOCKER_COMPOSE_FILE_AGENTIC = ./docker-compose-agentic.yml
 DOCKER_COMPOSE = docker compose
 SECURE_MODE='false'
 
 DRI_MOUNT_PATH := $(shell [ -d /dev/dri ] && [ -n "$$(ls -A /dev/dri 2>/dev/null)" ] && echo "/dev/dri" || echo "/dev/null")
 export DRI_MOUNT_PATH
+
+ACCEL_MOUNT_PATH := $(shell [ -d /dev/accel ] && [ -n "$$(ls -A /dev/accel 2>/dev/null)" ] && echo "/dev/accel" || echo "/dev/null")
+export ACCEL_MOUNT_PATH
 
 # Define the path to the .env file and scripts
 ENV_FILE = ./.env
@@ -33,12 +36,12 @@ SHA_ALGO="sha384"
 .PHONY: build
 build:
 	@echo "Building Docker containers..."
-	$(DOCKER_COMPOSE) build --pull;
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_VLLM) -f $(DOCKER_COMPOSE_FILE_AGENTIC) build --pull;
 
 .PHONY: build_copyleft_sources
 build_copyleft_sources:
 	@echo "Building Docker containers including copyleft licensed sources..."
-	$(DOCKER_COMPOSE) build --build-arg COPYLEFT_SOURCES=true --pull;
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_VLLM) build --build-arg COPYLEFT_SOURCES=true --pull;
 
 .PHONY: validate_host_ip
 validate_host_ip:
@@ -48,8 +51,12 @@ validate_host_ip:
 		echo "HOST_IP is not set in $(ENV_FILE)."; \
 		exit 1; \
 	fi; \
+	if [ "$$host_ip" = "localhost" ]; then \
+		echo "HOST_IP ($$host_ip) is valid."; \
+		exit 0; \
+	fi; \
 	if ! echo "$$host_ip" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$$'; then \
-		echo "HOST_IP ($$host_ip) is not a valid IPv4 address format."; \
+		echo "HOST_IP ($$host_ip) must be localhost or a valid IPv4 address format."; \
 		exit 1; \
 	fi; \
 	for octet in $$(echo "$$host_ip" | tr '.' ' '); do \
@@ -192,15 +199,132 @@ post_config:
 
 .PHONY: up
 up: check_env_variables validate_host_ip down
-	@export TELEGRAF_INPUT_PLUGIN=$$(if [ $(INCLUDE) = 'validation' ]; then echo "mqtt_consumer:net:cpu:disk:docker:diskio:kernel:mem:processes:swap:system"; else echo "mqtt_consumer"; fi); \
+	@export TELEGRAF_INPUT_PLUGIN=mqtt_consumer; \
+	export NGINX_CONFIG_PATH=./configs/nginx/nginx.conf; \
 	echo "Starting Docker containers..."; \
 	echo "GPU device path set to: $(DRI_MOUNT_PATH) based on its existence"; \
-	if [ $(INCLUDE) = 'validation' ]; then \
-		$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_VALIDATION_FILE) up -d; \
-	else \
-		$(DOCKER_COMPOSE) up -d; \
-	fi; \
+	cp configs/grafana/dashboards_jsons/weld_defect_detection.json configs/grafana/provisioning/weld_defect_detection.json || exit 1; \
+	$(DOCKER_COMPOSE) up -d; \
 	$(MAKE) upload_tar_file
+
+
+.PHONY: check_models
+check_models:
+	@echo "Checking if vllm models are available..."
+	@for dir in configs/vllm/models configs/vllm/huggingface; do \
+		if [ ! -d "$$dir" ]; then \
+			echo "Error: $$dir directory does not exist."; \
+			exit 1; \
+		fi; \
+		if [ -z "$$(ls -A $$dir 2>/dev/null)" ]; then \
+			echo "Error: $$dir directory is empty."; \
+			exit 1; \
+		fi; \
+		echo "Models found in $$dir directory."; \
+	done
+
+.PHONY: check_hardware
+check_hardware:
+	@echo "Checking hardware compatibility (Panther Lake or above required)..."
+	@cpu_model=$$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | xargs); \
+	echo "Detected CPU: $$cpu_model"; \
+	if ! echo "$$cpu_model" | grep -qi "intel"; then \
+		echo "Error: An Intel processor is required. Panther Lake (Core Ultra 3xx) or above."; \
+		exit 1; \
+	fi; \
+	model_num=$$(echo "$$cpu_model" | grep -oiP 'Ultra\s+[3579]\s+\K\d{3}'); \
+	if [ -z "$$model_num" ]; then \
+		echo "Error: Intel Core Ultra processor not detected. Panther Lake (Core Ultra 3xx) or above is required."; \
+		exit 1; \
+	fi; \
+	gen=$$(echo "$$model_num" | cut -c1); \
+	if [ "$$gen" -lt 3 ]; then \
+		echo "Error: Panther Lake (Intel Core Ultra 3xx) or above is required. Detected: $$cpu_model"; \
+		exit 1; \
+	fi; \
+	echo "Hardware check passed: Intel Core Ultra $${model_num} detected."
+
+.PHONY: up_vllm
+up_vllm: check_hardware check_models check_env_variables validate_host_ip down
+	@export TELEGRAF_INPUT_PLUGIN=mqtt_consumer; \
+	export NGINX_CONFIG_PATH=./configs/nginx/nginx_vllm.conf; \
+	echo "Starting Docker containers..."; \
+	echo "GPU device path set to: $(DRI_MOUNT_PATH) based on its existence"; \
+	cp configs/grafana/dashboards_jsons/weld_defect_detection_vlm.json configs/grafana/provisioning/weld_defect_detection.json || exit 1; \
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_VLLM) up -d; \
+	$(MAKE) upload_tar_file
+
+download_model:
+	@echo "Starting Model Download Service..."; \
+	mkdir -p configs/agentic/models; \
+	$(shell chmod -R 755 configs/agentic/models) \
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_AGENTIC) -f $(DOCKER_COMPOSE_FILE_VLLM) up -d model-download; \
+	echo "Waiting for model-download service to become healthy on port 8200..."; \
+	i=0; \
+	while [ $$i -lt 60 ]; do \
+		if curl -sf "http://localhost:8200/api/v1/models/results" >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		if [ "$$i" -eq 59 ]; then \
+			echo "ERROR: model-download service did not become ready in time"; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+		i=$$(($$i + 1)); \
+	done; \
+	echo "Requesting download+conversion of '${LLM_MODEL_NAME}' (device=${LLM_DEVICE}, precision=${LLM_WEIGHT_FORMAT})..."; \
+	payload='{"models":[{"name":"${LLM_MODEL_NAME}","hub":"openvino","type":"llm","is_ovms":true,"config":{"precision":"${LLM_WEIGHT_FORMAT}","device":"${LLM_DEVICE}","pipeline_type":"LM_CB"}}],"parallel_downloads":false}'; \
+	http_code=$$(curl -w "%{http_code}" -s -o /tmp/model_response.json -X POST "http://localhost:8200/api/v1/models/download?download_path=llm_model_agentic" \
+		-H "Content-Type: application/json" \
+		-d "$$payload"); \
+	response=$$(cat /tmp/model_response.json); \
+	echo "  HTTP Status: $$http_code"; \
+	echo "  Response: $$response"; \
+	if [ "$$http_code" != "200" ]; then \
+		echo "ERROR: Unexpected HTTP status $$http_code from model-download"; \
+		exit 1; \
+	fi; \
+	job_id=$$(echo "$$response" | python3 -c "import sys, json; print(json.load(sys.stdin)['job_ids'][0])" 2>/dev/null) || { \
+		echo "ERROR: Failed to extract job_id from response"; \
+		exit 1; \
+	}; \
+	echo "Download job submitted (job_id=$$job_id). Waiting for completion..."; \
+	i=0; \
+	while [ $$i -lt 600 ]; do \
+		job=$$(curl -sf "http://localhost:8200/api/v1/jobs/$$job_id" 2>/dev/null || echo '{}'); \
+		status=$$(echo "$$job" | python3 -c "import sys, json; print(json.load(sys.stdin).get('status', 'unknown'))" 2>/dev/null); \
+		if [ "$$status" = "completed" ]; then \
+			echo "Download complete."; \
+			break; \
+		fi; \
+		if [ "$$status" = "failed" ]; then \
+			echo "ERROR: Download failed"; \
+			exit 1; \
+		fi; \
+		echo "  [$$i/600] Status: $$status"; \
+		i=$$(($$i + 1)); \
+		sleep 5; \
+	done; \
+	if [ $$i -ge 600 ]; then \
+		echo "ERROR: Download timeout (600 attempts exhausted)"; \
+		exit 1; \
+	fi; \
+	echo "Model download completed successfully"
+
+
+.PHONY: up_agentic
+up_agentic: check_hardware check_models check_env_variables validate_host_ip down
+	@export TELEGRAF_INPUT_PLUGIN=mqtt_consumer; \
+	export NGINX_CONFIG_PATH=./configs/nginx/nginx_agentic.conf; \
+	echo "Starting Docker containers..."; \
+	echo "GPU device path set to: $(DRI_MOUNT_PATH) based on its existence"; \
+	cp configs/grafana/dashboards_jsons/weld_defect_detection_vlm.json configs/grafana/provisioning/weld_defect_detection.json || exit 1; \
+	cp configs/grafana/dashboards_jsons/weld_defect_detection_agentic.json configs/grafana/provisioning/weld_defect_detection_agentic.json || exit 1; \
+	$(MAKE) download_model; \
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_AGENTIC) -f $(DOCKER_COMPOSE_FILE_VLLM) up -d; \
+	$(MAKE) upload_tar_file
+
+
 
 # Status of the deployed containers
 .PHONY: status
@@ -240,7 +364,7 @@ status:
 .PHONY: down
 down:
 	@echo "Stopping Docker containers...";
-	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) down -v --remove-orphans
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_VLLM) -f $(DOCKER_COMPOSE_FILE_AGENTIC) down -v --remove-orphans
 
 # Push the docker images to docker registry, ensure to configure DOCKER_REGISTRY in .env
 # and have logged into that. Applies mainly when one is dealing with internal docker registry.
@@ -249,7 +373,7 @@ down:
 .PHONY: push_images
 push_images: build
 	@echo "Pushing the images to docker registry"
-	docker compose -f $(DOCKER_COMPOSE_FILE) push
+	$(DOCKER_COMPOSE) -f $(DOCKER_COMPOSE_FILE) -f $(DOCKER_COMPOSE_FILE_VLLM) -f $(DOCKER_COMPOSE_FILE_AGENTIC) push
 
 
 # Generate helm packages
@@ -257,7 +381,8 @@ push_images: build
 gen_helm_charts:
 	@echo "Generating Helm packages"
 	$(eval version := $(shell if [ -n "$(WEEKLY_BUILD_DATE)" ] && [ "$(WEEKLY_BUILD_DATE)" != '""' ]; then echo "$(IMAGE_SUFFIX)-$(WEEKLY_BUILD_DATE)-weekly"; else echo "$(IMAGE_SUFFIX)"; fi))
-	@cp -f configs/grafana/* helm/
+	@cp -f configs/grafana/provisioning/* helm/
+	@cp -f configs/grafana/dashboards_jsons/weld_defect_detection.json helm/
 	@cp -f configs/influxdb/config/*.conf helm/
 	@cp -f configs/influxdb/init-influxdb.sh helm/
 	@cp -f configs/mqtt-broker/*.conf helm/

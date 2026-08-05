@@ -9,11 +9,9 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../utils')))
 import helm_utils
-import docker_utils
 import constants
-#import subprocess
+import subprocess
 import time
-import logging
 import logging
 
 logger = logging.getLogger(__name__)  # Get a logger for this module specifically
@@ -24,11 +22,11 @@ pytest_plugins = ["conftest_helm"]
 FUNCTIONAL_FOLDER_PATH_FROM_TEST_FILE, release_name, release_name_weld, chart_path, namespace, grafana_url, wait_time, target, PROXY_URL = helm_utils.get_env_values()
 
 def test_gen_chart():
-    logger.info("TC001: Generating helm chart.")
-    result = helm_utils.generate_helm_chart(chart_path)
-    logger.info(f"generate_helm_chart result: {result}")
-    assert result == True, "Failed to generate helm chart."
-    logger.info("Helm Chart is generated")
+    logger.info("TC001: Generating and packaging helm chart (using gen_helm_charts_targz).")
+    result = helm_utils.generate_helm_chart_targz(chart_path)
+    logger.info(f"generate_helm_chart_targz result: {result}")
+    assert result == True, "Failed to generate and package helm chart."
+    logger.info("Helm Chart is generated and packaged")
     logger.info("Current directory1 %s", os.getcwd())
     os.chdir(constants.PYTEST_DIR)
     logger.info("Current directory2 %s", os.getcwd())
@@ -91,13 +89,20 @@ def test_verify_pods_all_running_opcua_switch_to_mqtt(setup_helm_environment):
     result = helm_utils.check_pods(namespace)
     logger.info(f"check_pods result: {result}")
     assert result == True, "Pods are still running after cleanup."
+    # Wait for services (especially NodePort) to be fully deleted to avoid port allocation conflicts
+    services_result = helm_utils.check_services(namespace, timeout=constants.SERVICE_TERMINATION_TIMEOUT)
+    logger.info(f"check_services result: {services_result}")
+    if not services_result:
+        logger.warning("Some services are still present after the standard wait. Triggering forced cleanup before failing.")
+        helm_utils.force_cleanup_namespace(namespace)
+        assert helm_utils.check_services(namespace, timeout=constants.SERVICE_TERMINATION_TIMEOUT) == True, "Failed to clean up lingering services before Helm install."
     case = helm_utils.password_test_cases["test_case_3"]
     values_yaml_path = os.path.expandvars(chart_path + '/values.yaml')
     result = helm_utils.update_values_yaml(values_yaml_path, case)
     logger.info(f"update_values_yaml result: {result}")
     assert result == True, "Failed to update values.yaml."
     # Determine SAMPLE_APP based on release name to match UDF package directory
-    sample_app = "wind-turbine-anomaly-detection" if "wind" in release_name.lower() else "weld-anomaly-detection"
+    sample_app = "wind-turbine-anomaly-detection" if "wind" in release_name.lower() else "weld-defect-detection"
     result = helm_utils.helm_install(release_name, chart_path, namespace, constants.TELEGRAF_OPCUA_PLUGIN, sample_app=sample_app)
     logger.info(f"helm_install result: {result}")
     assert result == True, "Failed to install Helm release."
@@ -127,14 +132,32 @@ def test_verify_pods_all_running_opcua_switch_to_mqtt(setup_helm_environment):
     assert result == True, "Pods are still running after cleanup."
     
 @pytest.mark.parametrize("telegraf_input_plugin", [constants.TELEGRAF_OPCUA_PLUGIN])
-def test_verify_pods_opcua_for_5mins(setup_helm_environment, telegraf_input_plugin):
+def test_verify_pods_opcua_for_5mins(setup_helm_environment, telegraf_input_plugin, request):
     
     logger.info("TC_008: Testing OPC UA input plugin for 5 minutes, checking helm install, pod logs and uninstall with valid values in values.yaml")
+
+    def _restore_tick_to_mqtt():
+        try:
+            helm_utils.setup_mqtt_alerts(chart_path, sample_app=constants.WIND_SAMPLE_APP)
+        except Exception as e:
+            logger.warning(f"TC_008 finalizer: failed to reset TICK to mqtt mode: {e}")
+
+    request.addfinalizer(_restore_tick_to_mqtt)
+
     result = helm_utils.verify_pods(namespace)
     logger.info(f"verify_pods result: {result}")
     assert result is True, "Failed to verify pods for OPC UA input plugin."
     logger.info("All pods are running for opcua input plugin")
-    result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, sample_app=constants.WIND_SAMPLE_APP)
+
+    result = helm_utils.setup_opcua_alerts(chart_path)
+    logger.info(f"setup_opcua_alerts result: {result}")
+    assert result == True, "Failed to configure OPC UA alert in TICK script."
+
+    result = helm_utils.setup_sample_app_udf_deployment_package(
+        chart_path,
+        sample_app=constants.WIND_SAMPLE_APP,
+        alert_mode="opcua",
+    )
     logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
     assert result == True, "Failed to activate UDF deployment package."
     logger.info("UDF deployment package is activated")
@@ -147,19 +170,42 @@ def test_verify_pods_opcua_for_5mins(setup_helm_environment, telegraf_input_plug
     logger.info("Pods logs are working for opcua input plugin")
 
 @pytest.mark.parametrize("telegraf_input_plugin", [constants.TELEGRAF_OPCUA_PLUGIN])
-def test_verify_pods_stability_after_udf_activation(setup_helm_environment, telegraf_input_plugin):
+def test_verify_pods_stability_after_udf_activation(setup_helm_environment, telegraf_input_plugin, request):
     logger.info("TC_009: Testing pods stability after UDF activation for OPC UA input plugin, checking helm install, pod logs and uninstall with valid values in values.yaml")
+    # Restore TICK to mqtt mode on teardown so later tests see a clean baseline.
+    def _restore_tick_to_mqtt():
+        try:
+            helm_utils.setup_mqtt_alerts(chart_path, sample_app=constants.WIND_SAMPLE_APP)
+        except Exception as e:
+            logger.warning(f"TC_009 finalizer: failed to reset TICK to mqtt mode: {e}")
+    request.addfinalizer(_restore_tick_to_mqtt)
     result = helm_utils.verify_pods(namespace)
     logger.info(f"verify_pods result: {result}")
     assert result is True, "Failed to verify pods for OPC UA input plugin."
     logger.info("All pods are running for opcua input plugin")
     time.sleep(wait_time)  # Wait for the pods to stabilize
-    result = helm_utils.verify_pods_logs(namespace, "error")
-    logger.info(f"verify_pods_logs result: {result}")
-    assert result == False, "Pod logs didn't show error type logs when udf package is not activated"
-    logger.info("Pod logs shows error message as udf package is not activated")
+    result = helm_utils.verify_ts_logs(namespace, "INFO")
+    logger.info(f"verify_ts_logs INFO result: {result}")
+    assert result == True, "Failed to verify INFO logs in pod logs"
+    logger.info("Pod logs show INFO messages as expected (pods healthy pre-UDF activation)")
 
-    result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, sample_app=constants.WIND_SAMPLE_APP)
+    # Step 1: Configure OPC UA alert in TICK script
+    logger.info("Step 1: Configuring OPC UA alert in TICK script...")
+    result = helm_utils.setup_opcua_alerts(chart_path)
+    logger.info(f"setup_opcua_alerts result: {result}")
+    assert result == True, "Failed to configure OPC UA alert in TICK script."
+    logger.info("OPC UA alert configured in TICK script successfully")
+
+    # Step 2: Upload UDF deployment package
+    logger.info("Step 2: Uploading UDF deployment package...")
+    result = helm_utils.upload_udf_tar_package(chart_path, constants.WIND_SAMPLE_APP)
+    logger.info(f"upload_udf_tar_package result: {result}")
+    assert result == True, "Failed to upload UDF deployment package."
+    logger.info("UDF deployment package uploaded successfully")
+
+    # Step 3: Configure OPC UA alert in config.json and activate
+    logger.info("Step 3: Configuring OPC UA alert in config.json and activating...")
+    result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, sample_app=constants.WIND_SAMPLE_APP, alert_mode="opcua")
     logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
     assert result == True, "Failed to activate UDF deployment package."
     logger.info(f"UDF deployment package is activated and waiting for {wait_time} seconds for pods to stabilize")
@@ -179,7 +225,10 @@ def test_verify_pods_stability_after_influxdb_restart(setup_helm_environment, te
     assert result is True, "Failed to verify pods for OPC UA input plugin."
     logger.info("All pods are running for opcua input plugin")
     time.sleep(3)  # Wait for the pods to stabilize
-    result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, sample_app=constants.WIND_SAMPLE_APP)
+    # Chart uses the OPC UA telegraf plugin, so UDF must be activated in opcua mode.
+    result = helm_utils.setup_opcua_alerts(chart_path)
+    assert result == True, "Failed to configure OPC UA alert in TICK script."
+    result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, sample_app=constants.WIND_SAMPLE_APP, alert_mode="opcua")
     logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
     assert result == True, "Failed to activate UDF deployment package."
     logger.info(f"UDF deployment package is activated and waiting for {wait_time} seconds for pods to stabilize")
@@ -193,7 +242,7 @@ def test_verify_pods_stability_after_influxdb_restart(setup_helm_environment, te
     logger.info(f"pod_restart result: {result}")
     assert result == True, "Failed to restart pod for opcua input plugin."
     logger.info("Pod is restarted for opcua input plugin")
-    time.sleep(1)
+    time.sleep(wait_time)  # Wait for pods to fully stabilize after restart
     result = helm_utils.verify_pods(namespace)
     logger.info(f"verify_pods result: {result}")
     assert result is True, "Failed to verify pods for opcua input plugin."
@@ -243,11 +292,9 @@ def test_verify_pods_mqtt_for_5mins(setup_helm_environment, telegraf_input_plugi
     logger.info("UDF package copied and activated successfully")
     
     # Wait for Kapacitor to fully start after UDF installation (includes pip install with PyPI timeouts)
-    max_wait_seconds = 420
-    poll_interval_seconds = 10
     logger.info(
         "Waiting up to %ss for Kapacitor to install UDF packages and restart pods...",
-        max_wait_seconds,
+        constants.KAPACITOR_UDF_INSTALL_TIMEOUT,
     )
     start_time = time.time()
     while True:
@@ -256,12 +303,12 @@ def test_verify_pods_mqtt_for_5mins(setup_helm_environment, telegraf_input_plugi
             break
 
         elapsed = time.time() - start_time
-        if elapsed >= max_wait_seconds:
+        if elapsed >= constants.KAPACITOR_UDF_INSTALL_TIMEOUT:
             pytest.fail(
-                f"Timed out after {max_wait_seconds}s waiting for Kapacitor pods to become ready after UDF deployment."
+                f"Timed out after {constants.KAPACITOR_UDF_INSTALL_TIMEOUT}s waiting for Kapacitor pods to become ready after UDF deployment."
             )
 
-        time.sleep(poll_interval_seconds)
+        time.sleep(constants.KAPACITOR_UDF_POLL_INTERVAL)
 
     logger.info("Wait for the application to run for 5 minutes...")
     time.sleep(300)  # Wait for the pods to stabilize
@@ -280,24 +327,32 @@ def test_opcua_alerts(setup_helm_environment, telegraf_input_plugin):
     logger.info(f"verify_pods result: {result}")
     assert result is True, "Failed to verify pods for OPC UA input plugin."
     logger.info("All pods are running for opcua input plugin")
-    # Set up OPC UA alerts
+
+    # Step 1: Configure OPC UA alert in TICK script
+    logger.info("Step 1: Configuring OPC UA alert in TICK script...")
     result = helm_utils.setup_opcua_alerts(chart_path)
     logger.info(f"setup_opcua_alerts result: {result}")
     assert result == True, "Failed to set up OPC UA alerts."
-    logger.info("OPC UA alerts are set up successfully")
-    
-    # Copy UDF package and activate
+    logger.info("OPC UA alert configured in TICK script successfully")
+
+    # Step 2: Upload UDF deployment package
+    logger.info("Step 2: Uploading UDF deployment package...")
+    result = helm_utils.upload_udf_tar_package(chart_path, constants.WIND_SAMPLE_APP)
+    logger.info(f"upload_udf_tar_package result: {result}")
+    assert result == True, "Failed to upload UDF deployment package."
+    logger.info("UDF deployment package uploaded successfully")
+
+    # Step 3: Configure OPC UA alert in config.json and activate
+    logger.info("Step 3: Configuring OPC UA alert in config.json and activating...")
     result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, alert_mode="opcua")
     logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
     assert result == True, "Failed to activate UDF deployment package."
-    logger.info("UDF package copied and activated successfully")
+    logger.info("UDF package configured and activated successfully")
     
     # Wait for Kapacitor to fully start after UDF installation (includes pip install with PyPI timeouts)
-    max_wait_seconds = 420
-    poll_interval_seconds = 10
     logger.info(
         "Waiting up to %ss for Kapacitor to install UDF packages and restart pods...",
-        max_wait_seconds,
+        constants.KAPACITOR_UDF_INSTALL_TIMEOUT,
     )
     start_time = time.time()
     while True:
@@ -306,12 +361,12 @@ def test_opcua_alerts(setup_helm_environment, telegraf_input_plugin):
             break
 
         elapsed = time.time() - start_time
-        if elapsed >= max_wait_seconds:
+        if elapsed >= constants.KAPACITOR_UDF_INSTALL_TIMEOUT:
             pytest.fail(
-                f"Timed out after {max_wait_seconds}s waiting for Kapacitor pods to become ready after UDF deployment."
+                f"Timed out after {constants.KAPACITOR_UDF_INSTALL_TIMEOUT}s waiting for Kapacitor pods to become ready after UDF deployment."
             )
 
-        time.sleep(poll_interval_seconds)
+        time.sleep(constants.KAPACITOR_UDF_POLL_INTERVAL)
     
     result = helm_utils.restart_deployment(namespace, "opcua-server")
     logger.info(f"restart_deployment result: {result}")
@@ -336,13 +391,20 @@ def test_verify_pods_logs_with_respect_to_log_level(setup_helm_environment, tele
     result = helm_utils.check_pods(namespace)
     logger.info(f"check_pods result: {result}")
     assert result == True, "Pods are still running after cleanup."
+    # Wait for services (especially NodePort) to be fully deleted to avoid port allocation conflicts
+    services_result = helm_utils.check_services(namespace, timeout=constants.SERVICE_TERMINATION_TIMEOUT)
+    logger.info(f"check_services result: {services_result}")
+    if not services_result:
+        logger.warning("Some services are still present after the standard wait. Triggering forced cleanup before failing.")
+        helm_utils.force_cleanup_namespace(namespace)
+        assert helm_utils.check_services(namespace, timeout=constants.SERVICE_TERMINATION_TIMEOUT) == True, "Failed to clean up lingering services before Helm install."
     values_yaml_path = os.path.expandvars(chart_path + '/values.yaml')
     result = helm_utils.update_values_yaml(values_yaml_path, case)
     logger.info(f"update_values_yaml result: {result}")
     assert result == True, "Failed to update values.yaml."
     logger.info(f"Case 4 - Release Name: {release_name}, Chart Path: {chart_path}, Namespace: {namespace}, Telegraf Input Plugin opcua: {constants.TELEGRAF_OPCUA_PLUGIN}, Telegraf Input Plugin mqtt: {constants.TELEGRAF_MQTT_PLUGIN}")
     # Determine SAMPLE_APP based on release name to match UDF package directory
-    sample_app = "wind-turbine-anomaly-detection" if "wind" in release_name.lower() else "weld-anomaly-detection"
+    sample_app = "wind-turbine-anomaly-detection" if "wind" in release_name.lower() else "weld-defect-detection"
     result = helm_utils.helm_install(release_name, chart_path, namespace, constants.TELEGRAF_OPCUA_PLUGIN, sample_app=sample_app)
     logger.info(f"helm_install result: {result}")
     assert result == True, "Failed to install Helm release."
@@ -420,15 +482,13 @@ def test_influxdb_data_with_opcua(setup_helm_environment, telegraf_input_plugin)
     assert result is True, "Failed to verify pods for OPC UA input plugin."
     logger.info("All pods are running for opcua input plugin")
     
-    # Copy UDF package and activate - ConfigMap was already patched during helm_install
-    # The API restart endpoint will stop Kapacitor, install UDF pip packages, then start Kapacitor
+    # Copy UDF package and activate; API restart endpoint will install pip packages and restart Kapacitor
     result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, alert_mode="opcua")
     logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
     assert result == True, "Failed to activate UDF deployment package."
     logger.info("UDF package copied and activated successfully")
     
-    # Wait for Kapacitor to fully start after UDF installation (includes pip install with PyPI timeouts)
-    # This is required because the MQTT/OPC UA publisher waits for Kapacitor port 9092 to be accessible
+    # Wait for Kapacitor to fully start after UDF pip installation
     logger.info(f'Waiting {constants.UDF_DEPLOYMENT_TIMEOUT}s (3min) for Kapacitor to install UDF packages and start...')
     time.sleep(constants.UDF_DEPLOYMENT_TIMEOUT)
     
@@ -461,21 +521,104 @@ def test_influxdb_data_with_mqtt(setup_helm_environment, telegraf_input_plugin):
     assert result is True, "Failed to verify pods for MQTT input plugin."
     logger.info("All pods are running for mqtt input plugin")
     
-    # Copy UDF package and activate - ConfigMap was already patched during helm_install
-    # The API restart endpoint will stop Kapacitor, install UDF pip packages, then start Kapacitor
+    # Copy UDF package and activate; API restart endpoint will install pip packages and restart Kapacitor
     result = helm_utils.setup_sample_app_udf_deployment_package(chart_path, alert_mode="mqtt")
     logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
     assert result == True, "Failed to activate UDF deployment package."
     logger.info("UDF package copied and activated successfully")
-    
-    # Wait for Kapacitor to fully start after UDF installation (includes pip install with PyPI timeouts)
-    # This is required because the MQTT publisher waits for Kapacitor port 9092 to be accessible
-    logger.info(f"Waiting {constants.UDF_DEPLOYMENT_TIMEOUT}s (3min) for Kapacitor to install UDF packages and start...")
-    time.sleep(constants.UDF_DEPLOYMENT_TIMEOUT)
-    
+
+    logger.info(
+        "Smart-waiting for Kapacitor UDF task "
+        f"(marker={constants.KAPACITOR_TASK_MARKER!r}, ceiling={constants.KAPACITOR_READY_TIMEOUT}s, "
+        f"interval={constants.KAPACITOR_POLL_INTERVAL}s) instead of fixed sleep({constants.UDF_DEPLOYMENT_TIMEOUT}s)"
+    )
+    tsam_pod = helm_utils._wait_for_pod_with_substring(
+        namespace, "time-series-analytics-microservice", timeout=120
+    )
+    if not tsam_pod:
+        logger.warning(
+            "TSAM pod not found within 120s \u2014 falling back to "
+            f"original sleep({constants.UDF_DEPLOYMENT_TIMEOUT}s)"
+        )
+        time.sleep(constants.UDF_DEPLOYMENT_TIMEOUT)
+    else:
+        # Probe inside TSAM: curl /kapacitor/v1/tasks (urllib fallback); exit 0 if task marker present.
+        probe_sh = (
+            "set -e; "
+            "BODY=$( (command -v curl >/dev/null && curl -sf --max-time 5 "
+            "http://localhost:9092/kapacitor/v1/tasks) "
+            "|| python3 -c 'import urllib.request,sys; "
+            "sys.stdout.write(urllib.request.urlopen(\"http://localhost:9092/kapacitor/v1/tasks\", "
+            "timeout=5).read().decode())' ); "
+            "echo \"$BODY\" | grep -q '" + constants.KAPACITOR_TASK_MARKER + "'"
+        )
+        start = time.time()
+        deadline = start + constants.KAPACITOR_READY_TIMEOUT
+        ready = False
+        last_body = ""
+        while time.time() < deadline:
+            elapsed = int(time.time() - start)
+            try:
+                probe = subprocess.run(
+                    ["kubectl", "exec", "-n", namespace, tsam_pod, "--",
+                     "sh", "-c", probe_sh],
+                    capture_output=True, text=True, timeout=20,
+                )
+                last_body = (probe.stdout or probe.stderr or "").strip()[:200]
+                if probe.returncode == 0:
+                    logger.info(
+                        f"Kapacitor UDF task '{constants.KAPACITOR_TASK_MARKER}' "
+                        f"live after ~{elapsed}s "
+                        f"(saved up to {max(0, constants.UDF_DEPLOYMENT_TIMEOUT - elapsed)}s vs fixed sleep)"
+                    )
+                    ready = True
+                    break
+                logger.info(
+                    f"Task not loaded yet at ~{elapsed}s "
+                    f"(rc={probe.returncode}); next probe in {constants.KAPACITOR_POLL_INTERVAL}s"
+                )
+            except subprocess.TimeoutExpired:
+                logger.info(f"kubectl exec probe timed out at ~{elapsed}s")
+            except Exception as exc:
+                logger.info(f"probe error at ~{elapsed}s: {exc}")
+            time.sleep(constants.KAPACITOR_POLL_INTERVAL)
+
+        if not ready:
+            logger.error(f"Last probe stdout/stderr: {last_body!r}")
+            # Capture last-80 lines of TSAM log to make CI triage one-shot.
+            try:
+                tsam_logs = subprocess.run(
+                    ["kubectl", "logs", "-n", namespace, tsam_pod, "--tail", "80"],
+                    capture_output=True, text=True, timeout=15,
+                ).stdout.strip()
+                logger.error(f"TSAM pod tail (last 80):\n{tsam_logs}")
+            except Exception as exc:
+                logger.warning(f"Failed to tail TSAM logs: {exc}")
+            pytest.fail(
+                f"Kapacitor UDF task '{constants.KAPACITOR_TASK_MARKER}' "
+                f"not loaded within {constants.KAPACITOR_READY_TIMEOUT}s after /ts-api/restart — "
+                f"likely a slow PyPI pip install of UDF deps; bump KAPACITOR_READY_TIMEOUT "
+                f"or pre-bake UDF deps into the TSAM image."
+            )
+
+    # Use the actual MQTT wire topic the publisher sends on. Note:
+    # constants.WIND_TURBINE_INGESTED_TOPIC ("wind-turbine-data") is the
+    # InfluxDB measurement name (Telegraf name_override), NOT the MQTT topic.
+    # The publisher/broker traffic is on WIND_TURBINE_MQTT_TOPIC
+    # ("wind-simulation-data").
+    logger.info(
+        f"Calling wait_for_mqtt_sample(topic="
+        f"{constants.WIND_TURBINE_MQTT_TOPIC!r}, timeout={constants.MQTT_SAMPLE_TIMEOUT}s) "
+        f"(was timeout=120s)"
+    )
+
     # Verify MQTT data is being published before checking InfluxDB
     logger.info("Verifying MQTT data ingestion from publisher pod...")
-    result = helm_utils.wait_for_mqtt_sample(namespace, constants.WIND_TURBINE_INGESTED_TOPIC, timeout=120)
+    result = helm_utils.wait_for_mqtt_sample(
+        namespace,
+        constants.WIND_TURBINE_MQTT_TOPIC,
+        timeout=constants.MQTT_SAMPLE_TIMEOUT,  # was 120
+    )
     logger.info(f"wait_for_mqtt_sample result: {result}")
     assert result == True, "Failed to observe MQTT data before InfluxDB verification."
     logger.info(f"MQTT data confirmed. Waiting additional {wait_time}s for data to flow to InfluxDB...")
@@ -514,69 +657,6 @@ def test_opcua_time_kpi():
         f"Build success rate {success_rate}% below required {constants.KPI_REQUIRED_SUCCESS_RATE}%"
     assert avg_time <= constants.KPI_BUILD_TIME_THRESHOLD, \
         f"Average build time {avg_time:.2f}s exceeds threshold of {constants.KPI_BUILD_TIME_THRESHOLD}s"
-    
-@pytest.mark.skipif(not docker_utils.check_system_gpu_devices(), reason="No GPU devices detected on this system")
-@pytest.mark.parametrize("telegraf_input_plugin", [constants.TELEGRAF_OPCUA_PLUGIN])
-def test_gpu_opcua_helm(setup_helm_environment, request, telegraf_input_plugin):
-    """TC_019: Testing GPU device configuration in time-series analytics helm config with OPC-UA"""
-    logger.info("TC_019: Testing GPU device configuration in time-series analytics helm config with OPC-UA")
-    
-    # Verify pods are running
-    result = helm_utils.verify_pods(namespace)
-    logger.info(f"verify_pods result: {result}")
-    assert result is True, "Failed to verify pods for OPC UA input plugin."
-    logger.info("All pods are running for opcua input plugin")
 
-    # Get the corrected chart path from the setup fixture
-    actual_chart_path = getattr(request.node, 'actual_chart_path', chart_path)
-    
-    # Set up UDF deployment package
-    result = helm_utils.setup_sample_app_udf_deployment_package(actual_chart_path, sample_app=constants.WIND_SAMPLE_APP)
-    logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
-    assert result == True, "Failed to activate UDF deployment package."
-    logger.info("UDF deployment package is activated")
+# GPU tests live in test_GPU_helm.py
 
-    # Wait for containers to stabilize and data to be generated
-    logger.info("Waiting for containers to stabilize and data to be generated...")
-    time.sleep(wait_time)
-    
-    # Execute curl command to post GPU configuration to the API using REST API approach
-    curl_result = helm_utils.execute_gpu_config_curl_helm(device="gpu", namespace=namespace)
-    
-    # Verify the curl command was successful
-    logger.info("Verifying GPU configuration test completed successfully")
-    logger.info(f"curl_result: {curl_result}")
-    assert curl_result, "GPU configuration test via REST API failed"
-
-@pytest.mark.skipif(not docker_utils.check_system_gpu_devices(), reason="No GPU devices detected on this system")
-@pytest.mark.parametrize("telegraf_input_plugin", [constants.TELEGRAF_MQTT_PLUGIN])
-def test_gpu_mqtt_helm(setup_helm_environment, request, telegraf_input_plugin):
-    """TC_020: Testing GPU device configuration in time-series analytics helm config with MQTT"""
-    logger.info("TC_020: Testing GPU device configuration in time-series analytics helm config with MQTT")
-    
-    # Verify pods are running
-    result = helm_utils.verify_pods(namespace)
-    logger.info(f"verify_pods result: {result}")
-    assert result is True, "Failed to verify pods for MQTT input plugin."
-    logger.info("All pods are running for mqtt input plugin")
-
-    # Get the corrected chart path from the setup fixture
-    actual_chart_path = getattr(request.node, 'actual_chart_path', chart_path)
-    
-    # Set up UDF deployment package
-    result = helm_utils.setup_sample_app_udf_deployment_package(actual_chart_path, sample_app=constants.WIND_SAMPLE_APP)
-    logger.info(f"setup_sample_app_udf_deployment_package result: {result}")
-    assert result == True, "Failed to activate UDF deployment package."
-    logger.info("UDF deployment package is activated")
-
-    # Wait for containers to stabilize and data to be generated
-    logger.info("Waiting for containers to stabilize and data to be generated...")
-    time.sleep(wait_time)
-    
-    # Execute curl command to post GPU configuration to the API using REST API approach
-    curl_result = helm_utils.execute_gpu_config_curl_helm(device="gpu", namespace=namespace)
-    
-    # Verify the curl command was successful
-    logger.info("Verifying GPU configuration test completed successfully")
-    logger.info(f"curl_result: {curl_result}")
-    assert curl_result, "GPU configuration test via REST API failed"

@@ -14,42 +14,48 @@ platform, see [Docker Documentation](https://docs.docker.com/) for an introducti
 Intel recommends using the unified setup script `setup.sh` that configures, builds, deploys,
 and manages the Smart Route Planning Agent.
 
-1. Clone the repository:
+1. Clone the suite:
 
-```bash
-git clone https://github.com/open-edge-platform/edge-ai-suites.git
-cd edge-ai-suites/metro-ai-suite/smart-route-planning-agent
-```
+   Go to the target directory of your choice and clone the suite.
+   If you want to clone a specific release branch, replace `main` with the desired tag.
+   To learn more on partial cloning, check the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
+
+   ```bash
+   git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/edge-ai-suites.git
+   cd edge-ai-suites
+   git sparse-checkout set metro-ai-suite
+   cd metro-ai-suite/smart-route-planning-agent
+   ```
 
 2. Run the complete setup:
 
-The setup script provides several options. For a complete setup (recommended for first-time
-users):
+   The setup script provides several options. For a complete setup (recommended for first-time
+   users):
 
-```bash
-source setup.sh --setup
-```
+   ```bash
+   source setup.sh --setup
+   ```
 
 3. Run alternative setup options
 
-For a more granular control, run these commands:
+   For a more granular control, run these commands:
 
-```bash
-# Build service images only (without starting containers)
-source setup.sh --build
+   ```bash
+   # Build service images only (without starting containers)
+   source setup.sh --build
 
-# Start services only (after build)
-source setup.sh --run
+   # Start services only (after build)
+   source setup.sh --run
 
-# Stop services
-source setup.sh --stop
+   # Stop services
+   source setup.sh --stop
 
-# Restart services
-source setup.sh --restart
+   # Restart services
+   source setup.sh --restart
 
-# Clean up containers, volumes, images, networks, and all related resources
-source setup.sh --clean
-```
+   # Clean up containers, volumes, images, networks, and all related resources
+   source setup.sh --clean
+   ```
 
 ## Manual Setup for Advanced Users
 
@@ -87,27 +93,28 @@ Agent and multiple Smart Traffic Intersection Agent edge nodes.
 
 ### Configure Edge Node Endpoints
 
-Edit `src/data/config.json` to add the IP addresses of your Smart Traffic Intersection Agent
-edge nodes:
+Edit `src/data/config.json` to add the IP addresses and ports of the edge nodes where Smart Traffic Intersection Agents are running.
+
+#### Example Configuration
 
 ```json
 {
-    "api_endpoint": "/api/v1/traffic/current?images=false",
+    "api_endpoint": "/api/v1/traffic/current/ws?images=false",
     "api_hosts": [
         {
-            "host": "http://<edge-node-1-ip>:8081"
+            "host": "ws://<node-1-ip>:<port>"
         },
         {
-            "host": "http://<edge-node-2-ip>:8082"
+            "host": "ws://<node-2-ip>:<port>"
         },
         {
-            "host": "http://<edge-node-3-ip>:8083"
+            "host": "ws://<node-3-ip>:<port>"
         }
     ]
 }
 ```
 
-Replace `<edge-node-X-ip>` with the actual IP addresses of your edge nodes.
+> **NOTE :** We can add `api_hosts` for even just one instance, however minimum three instances of Smart Traffic Intersection Agent is recommended for proper route planning in the application.
 
 ### Deploy the Route Planning Agent
 

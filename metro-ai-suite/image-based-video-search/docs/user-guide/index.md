@@ -75,6 +75,7 @@ continuously and appears in the UI as soon as the application starts.
 *Screenshot of the Image-Based Video Search sample application interface displaying search input and matched results*
 
 ## Learn More
+
 - [Get Started](./get-started.md)
 - [System Requirements](./get-started/system-requirements.md)
 - [Release Notes](./release-notes.md)
@@ -89,7 +90,7 @@ how-it-works
 how-to-use-gpu-for-inference
 how-to-use-npu-for-inference
 troubleshooting
-release-notes
+Release Notes <./release-notes.md>
 
 :::
 hide_directive-->

@@ -2,22 +2,27 @@ global:
   volumeHostPath: ''
   usePvc: true
   keepPvc: false
-  sharedPvcName: ''
   env:
     defaultClipDuration: '-1'
     defaultNumFrames: '64'
     defaultStartOffsetSec: '0'
-    embeddingDevice: CPU
     embeddingModelName: ''
     embeddingUseOv: 'true'
     ovModelsDir: /app/ov_models
     ovPerformanceMode: THROUGHPUT
-  gpu:
-    multimodalEmbeddingEnabled: false
-    vdmsDataprepEnabled: false
-    key: ''
-    device: ''
-    hostPath: /dev/dri
+    inferBatchSize: '32'
+    preprocessWorkers: '8'
+    videoFrameBatchSize: '64'
+    videoFrameQueueSize: '32'
+    videoFrameShmPoolBlockSize: '6220800'
+    videoFrameShmPoolBlocksMultiplier: '2'
+    videoFrameLogLevel: 'INFO'
+  accelGroupIds:
+    - 992
+  devices:
+    multimodalEmbedding:
+      device: CPU
+      key: ''
   proxy:
     httpProxy: ''
     httpsProxy: ''
@@ -59,6 +64,11 @@ securityContext:
 
 resources: {}
 
+# OpenVINO model cache directory. Points at the persistent ov_models mount so an
+# NPU/GPU first-compile is written once and reused across restarts (avoids slow
+# recompilation and startup-probe crash loops). Used when device is GPU/NPU.
+ovCacheDir: "/app/ov_models/ov_cache"
+
 modelPvc:
   enabled: true
   existingClaim: ''
@@ -97,12 +107,5 @@ tolerations: []
 
 affinity: {}
 
-podAffinity:
-  requiredDuringSchedulingIgnoredDuringExecution:
-    - labelSelector:
-        matchExpressions:
-          - key: app
-            operator: In
-            values:
-              - vdms-dataprep
-      topologyKey: kubernetes.io/hostname
+# Optional pod affinity rules for this microservice.
+podAffinity: {}

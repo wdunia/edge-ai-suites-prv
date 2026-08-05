@@ -15,6 +15,7 @@ import {
 } from "../../redux/slices/uiSlice";
 import { streamTranscript } from "../../services/api";
 import { typewriterStream } from "../../utils/typewriterStream";
+import { useFeatureConfig } from "../../hooks/useFeatureConfig";
 import "../../assets/css/TranscriptsTab.css";
 
 interface GroupedSegment {
@@ -52,6 +53,10 @@ const TranscriptsTab: React.FC = () => {
   const finishTimeoutRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const segmentsRef = useRef<typeof segments>([]);
+  
+  // Check if summary feature is enabled in backend
+  const { guard, loaded: featuresLoaded } = useFeatureConfig();
+  const hasSummaryFeature = featuresLoaded && guard.hasFeature('summary');
 
   const [segmentDisplayTexts, setSegmentDisplayTexts] = useState<string[]>([]);
   const [groupedSegments, setGroupedSegments] = useState<GroupedSegment[]>([]);
@@ -99,12 +104,12 @@ const TranscriptsTab: React.FC = () => {
       const speakerMatch = speaker.match(/speaker_(\d+)/i);
       if (speakerMatch) {
         const speakerNumber = speakerMatch[1];
-        const baseLabel = currentLanguage === "zh" ? "说话人" : labels.student.toUpperCase();
+        const baseLabel = currentLanguage === "zh" ? labels.student : labels.student.toUpperCase();
         return `${baseLabel}_${speakerNumber}`;
       }
-    
+
       if (speaker.toLowerCase() === 'speaker') {
-        return currentLanguage === "zh" ? "说话人" : labels.student.toUpperCase();
+        return currentLanguage === "zh" ? labels.student : labels.student.toUpperCase();
       }
       return speaker;
     }
@@ -117,7 +122,7 @@ const TranscriptsTab: React.FC = () => {
     
     setTimeout(() => {
       if (mountedRef.current) {
-        dispatch(transcriptionComplete());
+        dispatch(transcriptionComplete({ enableSummary: hasSummaryFeature }));
       }
     }, 150);
     // Guards are reset only when sessionId changes (see useEffect below).
@@ -234,7 +239,7 @@ const TranscriptsTab: React.FC = () => {
           });
         }
 
-        if (mountedRef.current) {
+        if (!controller.signal.aborted && mountedRef.current) {
           dispatch(completeSegmentTyping(idx));
         }
       } catch {
@@ -250,6 +255,13 @@ const TranscriptsTab: React.FC = () => {
     };
 
     run();
+
+    // Abort this segment's typewriter when the cursor moves on (or on unmount)
+    // so a stale run can't dispatch completeSegmentTyping for an old index.
+    return () => {
+      controller.abort();
+      typewriterControllers.current.delete(idx);
+    };
   }, [currentTypingIndex]);
 
   useEffect(() => {

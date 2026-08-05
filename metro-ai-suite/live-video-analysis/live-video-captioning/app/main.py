@@ -11,9 +11,9 @@ from backend.config import APP_PORT, UI_DIR
 from backend.routes import (
     config_router,
     models_router,
-    pipelines_router,
     runs_router,
     health_router,
+    cameras_router,
 )
 from backend.services import get_mqtt_subscriber, shutdown_mqtt_subscriber
 from backend.services import start_pipeline_health_monitor, stop_pipeline_health_monitor
@@ -49,9 +49,9 @@ app = FastAPI(title="Live Video Captioning API", lifespan=lifespan)
 # Include all routers
 app.include_router(config_router)
 app.include_router(models_router)
-app.include_router(pipelines_router)
 app.include_router(runs_router)
 app.include_router(health_router)
+app.include_router(cameras_router)
 
 
 @app.get("/")

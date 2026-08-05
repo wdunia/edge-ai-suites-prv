@@ -1,4 +1,4 @@
-# How to Deploy with Helm
+# Deploy with Helm
 
 This guide explains a simple Helm deployment for Smart Route Planning Agent.
 
@@ -8,7 +8,7 @@ This guide explains a simple Helm deployment for Smart Route Planning Agent.
 - Helm installed.
 - At least **2 instances of  Smart Traffic Intersection Agent** should be running and reachable. This is required for route planning to work correctly. (If no such instances are available, application can still be deployed and accessed by following this guide. However, no route planning will be done.)
 - Use this guide to deploy Smart Traffic Intersection Agent with Helm:
-  [Smart Traffic Intersection Agent - Deploy with Helm](https://github.com/open-edge-platform/edge-ai-suites/blob/main/metro-ai-suite/smart-traffic-intersection-agent/docs/user-guide/get-started/deploy-with-helm.md)
+  [Smart Traffic Intersection Agent - Deploy with Helm](https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/smart-traffic-intersection-agent/get-started/deploy-with-helm.html)
 
 ## Helm Version
 
@@ -22,7 +22,7 @@ This guide explains a simple Helm deployment for Smart Route Planning Agent.
 #### Option A: From Source Code
 
 ```bash
-git clone https://github.com/open-edge-platform/edge-ai-suites.git
+git clone https://github.com/open-edge-platform/edge-ai-suites.git -b main
 cd edge-ai-suites/metro-ai-suite/smart-route-planning-agent/chart
 ```
 
@@ -30,7 +30,7 @@ cd edge-ai-suites/metro-ai-suite/smart-route-planning-agent/chart
 
 Follow these 2 simple steps:
 
-1. Set the version of the helm chart required. Check different versions available here: https://hub.docker.com/r/intel/smart-route-planning-agent
+1. Set the version of the helm chart required. Check different versions available here: <https://hub.docker.com/r/intel/smart-route-planning-agent>
 
     ```bash
     helm_version=<version>
@@ -70,10 +70,10 @@ httpsProxy: "http://proxy.example.com:916"
 noProxy: "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,10.1.2.3,10.1.2.4"
 
 trafficIntersections:
-  apiEndpoint: "/api/v1/traffic/current?images=false"
+  apiEndpoint: "/api/v1/traffic/current/ws?images=false"
   hosts:
-    - "http://10.1.2.3:8081"
-    - "http://10.1.2.4:8081"
+    - "ws://10.1.2.3:8081"
+    - "ws://10.1.2.4:8081"
 ```
 
 ### Step 3: Set a Namespace Variable
@@ -90,8 +90,7 @@ namespace=<namespace_name>
 helm upgrade --install srpa . -n ${namespace} --create-namespace -f values_override.yaml
 ```
 
-> __**Note:**__ If you do not have permission to create a namespace and your cluster admin has already provided a namespace, use the following command instead: `helm upgrade --install srpa . -n ${namespace} -f values_override.yaml`. (Make sure you have already set the namespace veriable to required value in step 3.)
-
+> **Note:** If you do not have permission to create a namespace and your cluster admin has already provided a namespace, use the following command instead: `helm upgrade --install srpa . -n ${namespace} -f values_override.yaml`. (Make sure you have already set the namespace variable to the required value in step 3.)
 
 ### Step 5: Wait for Ready Pods
 

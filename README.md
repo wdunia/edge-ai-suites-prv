@@ -1,7 +1,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)]()
 [![Metro-AI-Suite](https://img.shields.io/badge/Metro%20AI%20Suite-3%20Samples-green)]()
 [![Manufacturing-AI-Suite](https://img.shields.io/badge/Manufacturing%20AI%20Suite-8%20Samples-green)]()
-[![Retail-AI-Suite](https://img.shields.io/badge/Retail%20AI%20Suite-2%20Samples-green)]()
+[![Retail-AI-Suite](https://img.shields.io/badge/Retail%20AI%20Suite-4%20Samples-green)]()
 
 # Edge-AI-Suites
 
@@ -26,7 +26,7 @@ These suites accelerate the development of custom AI solutions by offering:
 
 * [The Education AI Suite](education-ai-suite) is a collection of education-focused AI applications, libraries, and benchmarking tools to help developers build solutions faster.
 
-* [The Health And Life Sciences AI Suite](health-and-life-sciences-ai-suite) is a preview solution for supporting the healthcare field with AI software tools covering a wide range of monitoring and analysis features.
+* [The Health And Life Sciences AI Suite](health-and-life-sciences-ai-suite) is a solution for supporting the healthcare field with AI software tools covering a wide range of monitoring and analysis features.
 
 
 ## Contribute

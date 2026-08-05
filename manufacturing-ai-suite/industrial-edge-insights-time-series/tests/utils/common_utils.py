@@ -11,6 +11,7 @@ import os
 import yaml
 import secrets
 import string
+import shlex
 from datetime import datetime, timedelta
 from ruamel.yaml import YAML
 import logging
@@ -89,8 +90,7 @@ def _collect_live_logs(container_name, monitor_duration, search_pattern=None):
     try:
         # Run docker logs command for the duration
         process = subprocess.Popen(
-            f"docker logs -f {container_name}",
-            shell=True,
+            ["docker", "logs", "-f", container_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -161,7 +161,10 @@ _wait_for_stability = wait_for_stability
 
 def _run_command(cmd):
     """Execute shell commands."""
-    return subprocess.run(cmd, shell=True).returncode
+    # Convert string to list if needed to avoid shell=True
+    if isinstance(cmd, str):
+        cmd = shlex.split(cmd)
+    return subprocess.run(cmd).returncode
 
 def _check_and_set_working_directory():
     """Check current working directory and change to wind turbine directory."""
@@ -310,24 +313,30 @@ def check_logs_for_alerts(resource_name, input_type, resource_type="container", 
         return False
     
     start_time = time.time()
-    
+
     while time.time() - start_time < timeout:
         elapsed_time = time.time() - start_time
         remaining_time = timeout - elapsed_time
-        
-        logger.info(f"Monitoring... (elapsed: {elapsed_time:.1f}s, remaining: {remaining_time:.1f}s)")
-        
-        try:
-            # Get logs based on resource type
-            if resource_type == "container":
-                # For containers, use existing collect_live_logs function
-                monitor_duration = min(interval, remaining_time)
-                result = _collect_live_logs(resource_name, monitor_duration, search_pattern)
 
-                if result is True:
+        logger.info(f"Monitoring... (elapsed: {elapsed_time:.1f}s, remaining: {remaining_time:.1f}s)")
+
+        try:
+            # Snapshot-poll docker logs since test start (no `-f` streaming).
+            if resource_type == "container":
+                since_seconds = max(1, int(elapsed_time) + 1)
+                result = subprocess.run(
+                    ["docker", "logs", "--since", f"{since_seconds}s", resource_name],
+                    capture_output=True, text=True
+                )
+                combined = (result.stdout or "") + (result.stderr or "")
+                if search_pattern.lower() in combined.lower():
+                    for line in combined.splitlines():
+                        if search_pattern.lower() in line.lower():
+                            logger.info(f"[MATCH] {line.strip()}")
                     logger.info(f"✓ {input_type.upper()} Alert found in {resource_type} '{resource_name}' logs")
                     return True
-                    
+                time.sleep(min(interval, remaining_time))
+
             elif resource_type == "pod":
                 # For pods, use kubectl to get logs
                 result = subprocess.run(
@@ -359,6 +368,27 @@ def check_logs_for_alerts(resource_name, input_type, resource_type="container", 
             return False
     
     logger.info(f"Timeout reached ({timeout}s). No {input_type} alerts found in {resource_type} '{resource_name}' logs.")
+    try:
+        if resource_type == "container":
+            tail = subprocess.run(
+                ["docker", "logs", "--tail", "100", resource_name],
+                capture_output=True, text=True,
+            )
+            tail_output = (tail.stdout or "") + (tail.stderr or "")
+        elif resource_type == "pod":
+            tail = subprocess.run(
+                ["kubectl", "logs", resource_name, "-n", namespace, "--tail=100"],
+                capture_output=True, text=True,
+            )
+            tail_output = (tail.stdout or "") + (tail.stderr or "")
+        else:
+            tail_output = ""
+        logger.info(f"---- Last 100 log lines for {resource_type} '{resource_name}' ----")
+        for line in tail_output.splitlines():
+            logger.info(f"[TAIL] {line}")
+        logger.info(f"---- End of log tail for {resource_type} '{resource_name}' ----")
+    except Exception as e:
+        logger.error(f"Failed to fetch tail logs for {resource_type} '{resource_name}': {e}")
     return False
 
 def update_alert_in_tick_script(file_path, setup):
@@ -510,34 +540,43 @@ def check_logs_by_level(resource_name, log_level, resource_type="container", nam
                 wait_for_stability(45)
             
             # Container log checking using docker logs with grep
-            grep_command = f"docker logs {resource_name} 2>&1 | grep -i '{log_level_upper}'"
-            logger.info(f"Executing command: {grep_command}")
+            logger.info(f"Checking logs for {log_level_upper} in container '{resource_name}'")
             
-            result = subprocess.run(grep_command, shell=True, capture_output=True, text=True)
+            # Get logs without shell=True
+            logs_result = subprocess.run(
+                ["docker", "logs", resource_name],
+                stdout=subprocess.PIPE,
+                text=True,
+                stderr=subprocess.STDOUT
+            )
             
-            if result.returncode == 0 and result.stdout.strip():
-                # Found matching logs
-                lines = result.stdout.strip().split('\n')
+            if logs_result.returncode == 0:
+                # Search for the log level in the output
+                lines = [line for line in logs_result.stdout.split('\n') if log_level_upper in line.upper()]
                 count = len(lines)
                 
-                if log_level_upper == "ERROR":
-                    logger.error(f"✗ Found {count} {log_level_upper} log entries in container '{resource_name}'")
-                    logger.error("Sample error entries:")
-                    for i, line in enumerate(lines[:3]):
-                        logger.error(f"  {i+1}: {line}")
-                    if count > 3:
-                        logger.error(f"  ... and {count - 3} more error entries")
-                    return False
+                if count > 0:
+                    if log_level_upper == "ERROR":
+                        logger.error(f"✗ Found {count} {log_level_upper} log entries in container '{resource_name}'")
+                        logger.error("Sample error entries:")
+                        for i, line in enumerate(lines[:3]):
+                            logger.error(f"  {i+1}: {line}")
+                        if count > 3:
+                            logger.error(f"  ... and {count - 3} more error entries")
+                        return False
+                    else:
+                        logger.info(f"✓ Found {count} {log_level_upper} log entries in container '{resource_name}'")
+                        logger.info("Sample log entries:")
+                        for i, line in enumerate(lines[:3]):
+                            logger.info(f"  {i+1}: {line}")
+                        if count > 3:
+                            logger.info(f"  ... and {count - 3} more entries")
+                        return True
                 else:
-                    logger.info(f"✓ Found {count} {log_level_upper} log entries in container '{resource_name}'")
-                    logger.info("Sample log entries:")
-                    for i, line in enumerate(lines[:3]):
-                        logger.info(f"  {i+1}: {line}")
-                    if count > 3:
-                        logger.info(f"  ... and {count - 3} more entries")
-                    return True
+                    logger.info(f"✗ No {log_level_upper} log entries found in container '{resource_name}'")
+                    return False
             else:
-                logger.info(f"✗ No {log_level_upper} log entries found in container '{resource_name}'")
+                logger.error(f"✗ Failed to get logs from container '{resource_name}'")
                 return False
                 
         elif resource_type == "pod":
@@ -548,11 +587,7 @@ def check_logs_by_level(resource_name, log_level, resource_type="container", nam
             )
             logs = result.stdout.strip()
             
-            # Check for log level pattern - support multiple formats:
-            # 1. Python logging format: "ERROR -", "INFO -", "DEBUG -"
-            # 2. Kapacitor format: "lvl=error", "lvl=info", "lvl=debug"
-            # 3. Uvicorn/Gunicorn format: "INFO:", "DEBUG:", "ERROR:"
-            # 4. Standard logging format: "level=INFO", "level=DEBUG"
+            # Check for log level pattern in multiple formats (Python, Kapacitor, Uvicorn, standard)
             log_pattern_python = f"{log_level_upper} -"
             log_pattern_kapacitor = f"lvl={log_level_upper.lower()}"
             log_pattern_uvicorn = f"{log_level_upper}:"

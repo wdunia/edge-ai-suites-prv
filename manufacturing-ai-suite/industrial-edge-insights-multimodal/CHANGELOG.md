@@ -2,6 +2,98 @@
 
 All notable changes to this project are documented in this file.
 
+## [2026.1] - June 2026
+
+### Added
+- Added GPU and NPU support for Docker Compose and Helm deployments, including `/dev/accel` device mounts and updated UDF configuration. ([#2630])
+- Added how-to guide for configuring an external RTSP camera as the video source. ([#2388])
+- Added functional tests for multimodal analytics and Helm deployment workflows. ([#2283])
+- Added sparse checkout guidance to Manufacturing documentation. ([#2479])
+
+### Changed
+- Integrated new scikit-learn (Intel-accelerated) classifier ML model for weld defect detection, replacing the previous CatBoost model. ([#2378])
+- Updated DL Streamer Pipeline Server to the latest weekly tag. ([#2641])
+- Updated container image versions: SeaweedFS (4.15→4.23), Coturn (4.9.0→4.10.0), MediaMTX (1.16.3→1.18.1). ([#2639])
+- Renamed sample app "Weld Anomaly Detection" to "Weld Defect Detection" across all configs, docs, and scripts. ([#2504])
+- Updated UDF package upload format from zip to tar archives. ([#2441])
+- Updated version to `2026.1.0`. ([#2387])
+- Updated DL Streamer Pipeline Server image version. ([#2772])
+- Updated `gvawatermark` pipeline rendering configuration for DL Streamer Pipeline Server. ([#2723])
+- Updated image suffix and Helm chart version to `rc1`. ([#2717])
+- Removed `tmpfs` size options for SeaweedFS in Docker Compose configuration. ([#2726])
+
+### Security
+- Updated Docker Compose service image versions to address security vulnerabilities. ([#2579])
+- Addressed Bandit security findings in weld data simulator and functional tests. ([#2347])
+- Bumped `requests` to 2.33.0 in test requirements. ([#2343])
+- Fixed Trivy-reported vulnerabilities by updating SeaweedFS and Coturn container image versions. ([#2971])
+- Fixed security vulnerability issues in Helm templates. ([#2869])
+
+### Fixed
+- Fixed Helm automation deployment issues. ([#2424])
+- Fixed failing functional test cases. ([#2450])
+- Fixed minor issue in architecture diagram. ([#2568])
+- Fixed DL Streamer Pipeline Server proxy environment variable handling to support both proxy and non-proxy environments. ([#2727])
+- Improved stability and consistency of multimodal automation test suite. ([#2468])
+- Fixed get-started guide with step to stop and restart the pipeline when switching inference device. ([#2910])
+
+### Documentation
+- Distinguished Time-Series vs Multimodal Weld Defect Detection documentation. ([#2607])
+- Fixed broken reference in Weld Defect Detection documentation. ([#2581])
+- Fixed multimodal article documentation. ([#2489])
+- Updated Helm deployment documentation to describe running inference on different device targets (CPU/GPU/NPU). ([#2933])
+- Updated documentation links and references. ([#2857])
+- Minor documentation updates. ([#2789])
+- Updated release branch references in documentation for 2026.1. ([#2766])
+- Fixed documentation issues. ([#2752])
+- Updated clone commands to include explicit branch or release-tag parameter. ([#2662])
+- Removed "project" instances from GitHub navigation box directives in documentation index. ([#2385])
+- Language and formatting review of documentation. ([#2990])
+- Fixed punctuation and minor corrections in release notes. ([#2947])
+- Miscellaneous documentation fixes. ([#2932])
+
+---
+[#2283]: https://github.com/open-edge-platform/edge-ai-suites/pull/2283
+[#2343]: https://github.com/open-edge-platform/edge-ai-suites/pull/2343
+[#2347]: https://github.com/open-edge-platform/edge-ai-suites/pull/2347
+[#2369]: https://github.com/open-edge-platform/edge-ai-suites/pull/2369
+[#2378]: https://github.com/open-edge-platform/edge-ai-suites/pull/2378
+[#2385]: https://github.com/open-edge-platform/edge-ai-suites/pull/2385
+[#2387]: https://github.com/open-edge-platform/edge-ai-suites/pull/2387
+[#2388]: https://github.com/open-edge-platform/edge-ai-suites/pull/2388
+[#2424]: https://github.com/open-edge-platform/edge-ai-suites/pull/2424
+[#2441]: https://github.com/open-edge-platform/edge-ai-suites/pull/2441
+[#2450]: https://github.com/open-edge-platform/edge-ai-suites/pull/2450
+[#2468]: https://github.com/open-edge-platform/edge-ai-suites/pull/2468
+[#2479]: https://github.com/open-edge-platform/edge-ai-suites/pull/2479
+[#2489]: https://github.com/open-edge-platform/edge-ai-suites/pull/2489
+[#2504]: https://github.com/open-edge-platform/edge-ai-suites/pull/2504
+[#2568]: https://github.com/open-edge-platform/edge-ai-suites/pull/2568
+[#2579]: https://github.com/open-edge-platform/edge-ai-suites/pull/2579
+[#2581]: https://github.com/open-edge-platform/edge-ai-suites/pull/2581
+[#2607]: https://github.com/open-edge-platform/edge-ai-suites/pull/2607
+[#2630]: https://github.com/open-edge-platform/edge-ai-suites/pull/2630
+[#2639]: https://github.com/open-edge-platform/edge-ai-suites/pull/2639
+[#2641]: https://github.com/open-edge-platform/edge-ai-suites/pull/2641
+[#2662]: https://github.com/open-edge-platform/edge-ai-suites/pull/2662
+[#2717]: https://github.com/open-edge-platform/edge-ai-suites/pull/2717
+[#2723]: https://github.com/open-edge-platform/edge-ai-suites/pull/2723
+[#2726]: https://github.com/open-edge-platform/edge-ai-suites/pull/2726
+[#2727]: https://github.com/open-edge-platform/edge-ai-suites/pull/2727
+[#2752]: https://github.com/open-edge-platform/edge-ai-suites/pull/2752
+[#2766]: https://github.com/open-edge-platform/edge-ai-suites/pull/2766
+[#2772]: https://github.com/open-edge-platform/edge-ai-suites/pull/2772
+[#2789]: https://github.com/open-edge-platform/edge-ai-suites/pull/2789
+[#2857]: https://github.com/open-edge-platform/edge-ai-suites/pull/2857
+[#2869]: https://github.com/open-edge-platform/edge-ai-suites/pull/2869
+[#2910]: https://github.com/open-edge-platform/edge-ai-suites/pull/2910
+[#2932]: https://github.com/open-edge-platform/edge-ai-suites/pull/2932
+[#2933]: https://github.com/open-edge-platform/edge-ai-suites/pull/2933
+[#2947]: https://github.com/open-edge-platform/edge-ai-suites/pull/2947
+[#2971]: https://github.com/open-edge-platform/edge-ai-suites/pull/2971
+[#2990]: https://github.com/open-edge-platform/edge-ai-suites/pull/2990
+---
+
 ## [2026.0] - March 2026
 
 ### Added
@@ -94,14 +186,14 @@ All notable changes to this project are documented in this file.
 - Added "How to Deploy with Helm" section to documentation. ([#837])
 - Added comprehensive troubleshooting guides covering Grafana data visibility, InfluxDB retention policies, microservice startup delays, and deployment issues. ([#1130])
 - Added configurable session timeout settings for Grafana to control inactive user logout duration. ([#1000])
-- Added DLStreamer pipeline server references and detailed pipeline configuration documentation. ([#1002], [#1010])
+- Added DL Streamer pipeline server references and detailed pipeline configuration documentation. ([#1002], [#1010])
 
 ### Changed
 - Updated fusion logic default mode from "AND" to "OR" for anomaly detection, improving detection flexibility. ([#794])
 - Enhanced fusion analytics with additional metadata tracking, including vision classification labels.
 - Redesigned Grafana dashboard layout with new fusion analytics results table and reorganized panels.
 - Renamed resource folder from "weld-porosity" to "models" and updated model path to "weld-defect-classification-f16-DeiT". ([#840])
-- Updated DLStreamer pipeline server image from Ubuntu 22 to Ubuntu 24.
+- Updated DL Streamer pipeline server image from Ubuntu 22 to Ubuntu 24.
 - Modular refactoring of time series documentation for improved maintainability. ([#899])
 - Multimodal apps documentation updated to use tile layout for better navigation. ([#908])
 - Fixed references and broken links in documentation and toctree. ([#934], [#820])
@@ -112,7 +204,7 @@ All notable changes to this project are documented in this file.
 - Fixed dashboard name references in documentation. ([#881])
 - Updated documentation for multimodal weld defect detection, transitioning from wind turbine anomaly detection theme. ([#838])
 - Improved documentation clarity and consistency across files.
-- Updated documentation to include DLStreamer pipeline server references and modernized system requirements. ([#1002], [#1010])
+- Updated documentation to include DL Streamer pipeline server references and modernized system requirements. ([#1002], [#1010])
 - Improved formatting and organization of multimodal documentation. ([#1035], [#1036], [#1037])
 - Updated README with proper links and references. ([#1042])
 - Fixed documentation issues including spelling errors, incorrect URLs, and content organization. ([#1099])

@@ -3,19 +3,21 @@ import { useTranslation } from "react-i18next";
 import "../../assets/css/SearchSection.css";
 import { csSearch } from "../../services/api";
 import ResultSection, { type CsSearchResult } from "./ResultSection";
+import QASection from "./QASection";
 import warningIcon from "../../assets/images/warning-info.svg";
 import infoIcon from "../../assets/images/info-icon.svg";
 import cameraIcon from "../../assets/images/camera-icon.svg";
 import noSearchIcon from "../../assets/images/no-search-icon.svg";
 import { useAppSelector } from "../../redux/hooks";
 
+type SectionTab = "search" | "qa";
 type SearchTab = "text" | "image";
 type SearchType = "document" | "image" | "video";
 
 const MAX_QUERY_LENGTH = 100;
 const DEFAULT_MAX_RESULTS = 10;
 
-const ALLOWED_IMAGE_EXTENSIONS = new Set([".png"]);
+const ALLOWED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 
 function isAllowedImage(filename: string): boolean {
   const ext = filename.slice(filename.lastIndexOf(".")).toLowerCase();
@@ -35,14 +37,36 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-const SearchSection: React.FC = () => {
+interface SearchSectionProps {
+  disabled?: boolean;
+}
+
+const SearchSection: React.FC<SearchSectionProps> = ({ disabled }) => {
   const { t } = useTranslation();
   const csUploadsComplete = useAppSelector((s) => s.ui.csUploadsComplete);
   const csHasUploads = useAppSelector((s) => s.ui.csHasUploads);
   const csProcessing = useAppSelector((s) => s.ui.csProcessing);
+  const csSummarizing = useAppSelector((s) => s.ui.csSummarizing);
+  const csServerFilesExist = useAppSelector((s) => s.ui.csServerFilesExist);
   const csTags = useAppSelector((s) => s.ui.csTags);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const filterBoxRef = useRef<HTMLDivElement>(null);
+
+  // One-time popup for server files exist message
+  const [filesExistDismissed, setFilesExistDismissed] = useState(false);
+
+  // Auto-dismiss the files exist banner after 5 seconds
+  useEffect(() => {
+    if (csServerFilesExist && !csProcessing && !csSummarizing && !filesExistDismissed) {
+      const timer = setTimeout(() => {
+        setFilesExistDismissed(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [csServerFilesExist, csProcessing, csSummarizing, filesExistDismissed]);
+
+  // Top-level section tab: Search or Q&A
+  const [sectionTab, setSectionTab] = useState<SectionTab>("search");
 
   const [activeTab, setActiveTab] = useState<SearchTab>("text");
 
@@ -55,8 +79,6 @@ const SearchSection: React.FC = () => {
   const [selectedTypes, setSelectedTypes] = useState<Set<SearchType>>(
     new Set(["document", "image", "video"])
   );
-
-  const [isExpanded, setIsExpanded] = useState(true);
 
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [isLabelDropdownOpen, setIsLabelDropdownOpen] = useState(false);
@@ -107,10 +129,11 @@ const SearchSection: React.FC = () => {
   const [searchResults, setSearchResults] = useState<CsSearchResult[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const hasValidInput = activeTab === "text" ? query.trim().length > 0 : imageFile !== null;
   const hasSelectedType = selectedTypes.size > 0;
-  const canSearch = hasValidInput && hasSelectedType && !isSearching;
+  const canSearch = hasValidInput && hasSelectedType && !isSearching && !disabled;
 
   const handleTabChange = useCallback((tab: SearchTab) => {
     setActiveTab(tab);
@@ -200,6 +223,7 @@ const SearchSection: React.FC = () => {
 
     setIsSearching(true);
     setHasSearched(true);
+    setSearchError(null);
 
     try {
       const filter: Record<string, string[]> = {};
@@ -228,6 +252,11 @@ const SearchSection: React.FC = () => {
       setShowResults(true);
     } catch (error) {
       console.error("Search failed:", error);
+      if (error instanceof Error && error.message === "BACKEND_UNAVAILABLE") {
+        setSearchError("BACKEND_UNAVAILABLE");
+      } else {
+        setSearchError("SEARCH_FAILED");
+      }
       setSearchResults([]);
       setShowResults(true);
     } finally {
@@ -251,31 +280,56 @@ const SearchSection: React.FC = () => {
   return (
     <>
       <div className="cs-search-card">
-        {/* Header */}
-        <div className="cs-search-header">
-          <span className="cs-search-title">{t("searchSection.title")}</span>
-          <button 
-            className={`cs-search-chevron ${isExpanded ? "cs-search-chevron--expanded" : ""}`}
-            onClick={() => setIsExpanded(!isExpanded)}
-            aria-label={isExpanded ? "Collapse" : "Expand"}
+        {/* ── Section-level tab bar: Search | Q&A (mirrors Transcripts/Summary/Mindmap) ── */}
+        <div className="cs-search-section-tabs">
+          <button
+            className={`cs-search-section-tab ${sectionTab === "search" ? "cs-search-section-tab--active" : ""}`}
+            onClick={() => setSectionTab("search")}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            {t("searchSection.title")}
+          </button>
+          <button
+            className={`cs-search-section-tab ${sectionTab === "qa" ? "cs-search-section-tab--active" : ""}`}
+            onClick={() => setSectionTab("qa")}
+          >
+            {t("qaSection.title", "Q&A")}
           </button>
         </div>
 
+        {/* ── Q&A panel: always mounted to preserve chat history ── */}
+        <div style={{ display: sectionTab === "qa" ? "block" : "none" }}>
+          <QASection />
+        </div>
+
+        {/* ── Search panel: always mounted to preserve search results ── */}
+        <div style={{ display: sectionTab === "search" ? "block" : "none" }}>
+          <>
         {/* Processing warning when some files are still processing but search is available */}
-        {csUploadsComplete && csProcessing && (
+        {(csUploadsComplete && csProcessing) || csSummarizing ? (
           <div className="cs-search-warning-frame">
             <img className="cs-search-warning-frame-icon" src={infoIcon} alt="info" width="15" height="15" />
             <span className="cs-search-warning-frame-text">{t("search.processing")}</span>
           </div>
-        )}
+        ) : null}
 
-        {isExpanded && (
-          <>
-          {!csHasUploads ? (
+        {/* Server files exist message - one-time popup */}
+        {csServerFilesExist && !csProcessing && !csSummarizing && !filesExistDismissed ? (
+          <div className="cs-search-warning-frame cs-search-warning-frame--dismissable">
+            <img className="cs-search-warning-frame-icon" src={infoIcon} alt="info" width="15" height="15" />
+            <span className="cs-search-warning-frame-text">
+              {t("fileManager.filesExistMessage")}
+            </span>
+            <button
+              className="cs-search-warning-dismiss"
+              onClick={() => setFilesExistDismissed(true)}
+              title={t("fileManager.dismiss")}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+
+        {!csHasUploads ? (
           /* No files uploaded */
           <div className="cs-search-disabled">
             <img 
@@ -371,7 +425,7 @@ const SearchSection: React.FC = () => {
                 <input
                   ref={imageInputRef}
                   type="file"
-                  accept=".jpg"
+                  accept=".jpg,.jpeg,.png"
                   style={{ display: "none" }}
                   onChange={handleImageChange}
                 />
@@ -422,7 +476,7 @@ const SearchSection: React.FC = () => {
             {/* Section Divider */}
             <div className="cs-search-divider" />
 
-            {/* Filter by Label */}
+            {/* Filter by Tag */}
             <div className={`cs-search-filter-section ${!hasSelectedType || !hasValidInput ? "cs-search-filter-disabled" : ""}`}>
               <div className="cs-search-filter-label">{t("searchSection.filterByLabel")}</div>
               <div 
@@ -505,12 +559,12 @@ const SearchSection: React.FC = () => {
 
             {/* Results Section */}
             {hasSearched && showResults && (
-              <ResultSection results={searchResults} />
+              <ResultSection results={searchResults} error={searchError} />
             )}
           </>
         )}
-        </>
-        )}
+          </>
+        </div>
       </div>
     </>
   );

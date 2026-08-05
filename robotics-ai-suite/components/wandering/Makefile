@@ -57,8 +57,9 @@ test:
 		-e DEBIAN_FRONTEND=noninteractive \
 		amd64/ros:${ROS_DISTRO}-ros-base \
 		bash -c " \
-			apt-get -qq update && apt install -qq -y equivs devscripts ros-${ROS_DISTRO}-nav2-msgs ros-${ROS_DISTRO}-nav2-util ros-${ROS_DISTRO}-nav2-costmap-2d && \
+			apt-get -qq update && apt-get -qq -y upgrade && apt install -qq -y equivs devscripts ros-${ROS_DISTRO}-nav2-msgs ros-${ROS_DISTRO}-nav2-util ros-${ROS_DISTRO}-nav2-costmap-2d && \
 			source /opt/ros/${ROS_DISTRO}/setup.bash && \
+			rm -rf build install log && \
 			colcon build --executor sequential --event-handlers console_direct+ && \
 			source install/setup.bash && \
 			colcon test --return-code-on-test-failure --executor sequential --event-handlers console_direct+"
@@ -83,7 +84,7 @@ test-e2e:
 		echo \"deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main\" | tee /etc/apt/sources.list.d/oneAPI.list > /dev/null && \
 		apt-get -qq update && apt-get -q install -y wget python3 python3-pip xvfb graphicsmagick fluxbox wmctrl ffmpeg xdotool x11-utils && \
 		$(if $(filter humble,$(ROS_DISTRO)),python3 -m pip install --upgrade pip &&) \
-		pip3 install pytest Pillow $(if $(filter humble,$(ROS_DISTRO)),-U,--break-system-packages) && \
+		pip3 install $(if $(filter humble,$(ROS_DISTRO)),'pytest<8',pytest) Pillow $(if $(filter humble,$(ROS_DISTRO)),-U,--break-system-packages) && \
 		find . -name '*.deb' -not -name '*-build-deps_*' -not -name '*-dbgsym_*' -exec apt-get -q install -y {} \; && \
 		source /opt/ros/$(ROS_DISTRO)/setup.bash && \
 		export ROS_DOMAIN_ID=1 && \

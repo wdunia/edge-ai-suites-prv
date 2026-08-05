@@ -19,6 +19,7 @@ from utils.rtsp_recorder import (
     is_rtsp_recording_running,
 )
 from utils.runtime_config_loader import RuntimeConfig
+from utils.system_checker import check_dlstreamer_installation
 
 class PipelineName(Enum):
     """Enumeration of pipeline names"""
@@ -53,8 +54,8 @@ class VideoAnalyticsPipelineService:
         # Set model paths
         self.model_base_dir = Path(config.models.va.models_base_path).resolve() / "va"
         self.models = {
-            "yolov8m": "yolov8m-pose.xml",
-            "yolov8s": "yolov8s-pose.xml",
+            "front-pose": f"{config.models.va.front_pose_model}.xml",
+            "back-pose": f"{config.models.va.back_pose_model}.xml",
             "resnet18": "resnet18.xml",
             "mobilenetv2": "mobilenetv2.xml",
             "reid": "person-reidentification-retail-0288.xml",
@@ -81,8 +82,17 @@ class VideoAnalyticsPipelineService:
         self.pipeline_retry_counts: Dict[str, int] = {}
         self.max_retries = 10
 
+        # "eos" (normal), "failed" (gave up after max retries), or "stopped" (manual stop).
+        self.pipeline_final_status: Dict[str, str] = {}
+
         # Pipeline error events for status reporting (consumed by monitor_pipeline_status)
         self.pipeline_errors: Dict[str, List[str]] = {}
+
+        # Callback fired once when all pipelines have finished (EOS or stopped).
+        # Signature: on_all_pipelines_done(session_id: str) -> None
+        self.on_all_pipelines_done = None
+        self._reports_generated = False   # guard: fire at most once per service instance
+        self._any_pipeline_ran  = False   # guard: don't fire before any pipeline was launched
 
         ps = getattr(config.va_pipeline, "pose_statistics", None)
         self.min_frames_for_transition = getattr(ps, "min_frames_for_transition", 3) if ps else 3
@@ -93,17 +103,34 @@ class VideoAnalyticsPipelineService:
         self.unidentified_max = getattr(ps, "unidentified_max", 50) if ps else 50
         self.stale_unidentified_threshold = getattr(ps, "stale_unidentified_threshold", 30) if ps else 30
 
+        # Verify DL Streamer installation
+        if not check_dlstreamer_installation():
+            raise RuntimeError("DL Streamer is not installed or does not meet the minimum version requirement")
+
         # Register cleanup handler
         atexit.register(self._cleanup)
+
+    def _get_gstreamer_version(self) -> Optional[str]:
+        """Read GStreamer version from Windows registry"""
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\GStreamer1.0\x86_64") as key:
+                version, _ = winreg.QueryValueEx(key, "Version")
+                return version
+        except Exception as e:
+            self.logger.warning(f"Failed to read GStreamer version from registry: {e}")
+            return None
 
     def _setup_environment(self):
         """Setup GStreamer environment variables"""
         current_path = os.environ.get("GST_PLUGIN_PATH", "")
+
         os.environ["GST_PLUGIN_PATH"] = f"{self.plugin_path};{current_path}"
         os.environ["GST_DEBUG"] = (
             "GVA_common:2,gvaposturedetect:4,gvareid:4,gvaroifilter:4"
         )
-        os.environ["GST_PLUGIN_FEATURE_RANK"] = "d3d11h264dec:max,d3d11h265dec:max"
+        # Comment out to use d3d12 decoders as d3d11 decoder + gvawatermark + encoder causes crash
+        # os.environ["GST_PLUGIN_FEATURE_RANK"] = "d3d11h264dec:max,d3d11h265dec:max"
 
     def _get_model_path(self, model_key: str) -> str:
         """Get full path to model"""
@@ -123,7 +150,9 @@ class VideoAnalyticsPipelineService:
                 ["gst-discoverer-1.0.exe", file_path],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
             )
             combined_output = result.stdout + result.stderr
             if "An error was encountered while discovering the file" in combined_output:
@@ -186,9 +215,15 @@ class VideoAnalyticsPipelineService:
     def _get_rtsp_sink_elements(self, rtsp_url: str, pipeline_name: str) -> List[str]:
         """Get RTSP sink elements for pushing to RTSP server"""
         return [
+            "d3d11convert",
+            "!",
             "mfh264enc",
-            "bitrate=2000",
+            "bitrate=3000",
             "gop-size=15",
+            "low-latency=true",
+            "bframes=0",
+            "rc-mode=cbr",
+            "quality-vs-speed=0",
             "!",
             "h264parse",
             "!",
@@ -219,7 +254,9 @@ class VideoAnalyticsPipelineService:
         try:
             with open(log_file, "r") as f:
                 content = f.read()
-                idx = content.find("ERROR: from element")
+                idx = content.find("WARNING: erroneous pipeline")
+                if idx < 0:
+                    idx = content.find("ERROR: from element")
                 if idx >= 0:
                     return content[idx:].strip()
                 return None
@@ -263,6 +300,8 @@ class VideoAnalyticsPipelineService:
                     self.logger.info(
                         f"Pipeline '{pipeline_name}' exited normally (EOS received)"
                     )
+                    self.pipeline_final_status[pipeline_name] = "eos"
+                    self._fire_done_callback_if_all_finished()
                     break
                 else:
                     # Unexpected exit — record error for status reporting
@@ -309,12 +348,33 @@ class VideoAnalyticsPipelineService:
                             f"Pipeline '{pipeline_name}' reached maximum retry limit ({self.max_retries}). "
                             f"Giving up."
                         )
+                        self.pipeline_final_status[pipeline_name] = "failed"
+                        self._fire_done_callback_if_all_finished()
                         break
 
             # Check every 2 seconds
             time.sleep(2)
 
         self.logger.info(f"Monitor thread for pipeline '{pipeline_name}' stopped")
+
+    def _fire_done_callback_if_all_finished(self):
+        """Fire on_all_pipelines_done once when no pipeline processes remain running."""
+        if self._reports_generated or not self._any_pipeline_ran:
+            return
+        still_running = [
+            name for name, proc in self.pipelines.items()
+            if proc.poll() is None
+        ]
+        if still_running:
+            self.logger.debug(f"[VA] Pipelines still running: {still_running} — reports deferred.")
+            return
+        self._reports_generated = True
+        self.logger.info("[VA] All pipelines finished — triggering engagement report generation.")
+        if callable(self.on_all_pipelines_done):
+            try:
+                self.on_all_pipelines_done(getattr(self, "x_session_id", None))
+            except Exception as exc:
+                self.logger.error(f"[VA] on_all_pipelines_done callback raised: {exc}", exc_info=True)
 
     def _launch_pipeline_internal(
         self, pipeline_name: str, options: PipelineOptions, command: List[str]
@@ -342,7 +402,8 @@ class VideoAnalyticsPipelineService:
                 command,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
-                universal_newlines=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 env=os.environ.copy(),
                 creationflags=(
@@ -393,7 +454,7 @@ class VideoAnalyticsPipelineService:
             *self._get_source_elements(source, input_type),
             # YOLO detection
             "gvadetect",
-            f"model={self._get_model_path('yolov8m')}",
+            f"model={self._get_model_path('front-pose')}",
             f"device={options.device}",
             "pre-process-backend=d3d11",
             "batch-size=1",
@@ -508,7 +569,7 @@ class VideoAnalyticsPipelineService:
             *self._get_source_elements(source, input_type),
             # YOLO detection
             "gvadetect",
-            f"model={self._get_model_path('yolov8s')}",
+            f"model={self._get_model_path('back-pose')}",
             f"device={options.device}",
             "pre-process-backend=d3d11",
             "batch-size=1",
@@ -690,6 +751,8 @@ class VideoAnalyticsPipelineService:
 
             # Initialize retry count
             self.pipeline_retry_counts[pipeline_name] = 0
+            # Clear any prior final status for a fresh launch
+            self.pipeline_final_status.pop(pipeline_name, None)
 
             # Launch pipeline
             success = self._launch_pipeline_internal(pipeline_name, options, command)
@@ -731,6 +794,7 @@ class VideoAnalyticsPipelineService:
             self.logger.info(
                 f"Started monitoring thread for pipeline '{pipeline_name}'"
             )
+            self._any_pipeline_ran = True
 
             return True
 
@@ -789,6 +853,8 @@ class VideoAnalyticsPipelineService:
                 self.logger.info(f"Pipeline '{pipeline_name}' killed")
 
             del self.pipelines[pipeline_name]
+            self.pipeline_final_status[pipeline_name] = "stopped"
+            self._fire_done_callback_if_all_finished()
 
             # Stop monitoring thread
             if pipeline_name in self.monitor_stop_flags:
@@ -1357,6 +1423,7 @@ class VideoAnalyticsPipelineService:
                 "stand_count": 0,
                 "raise_up_count": 0,
                 "stand_reid": [],
+                "raise_reid": [],
             }
 
         person_count_samples = state["person_count_samples"]
@@ -1374,10 +1441,18 @@ class VideoAnalyticsPipelineService:
             for sid, cnt in sorted(state["student_stand_counts"].items())
             if cnt > 0
         ]
+        raise_reid = [
+            {"student_id": sid, "count": cnt}
+            for sid, cnt in sorted(
+                state["student_raise_counts"].items(), key=lambda x: x[1], reverse=True
+            )
+            if cnt > 0
+        ]
 
         return {
             "student_count": student_count,
             "stand_count": stand_count,
             "raise_up_count": raise_up_count,
             "stand_reid": stand_reid,
+            "raise_reid": raise_reid,
         }
