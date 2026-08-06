@@ -35,6 +35,18 @@ The script performs the whole documented application flow:
 Press **Ctrl+C** to stop — containers, RTSP streams and the ffmpeg publishers
 are all shut down.
 
+### Showroom appliance (Wi-Fi access point + remote start)
+
+For the unattended showroom setup — Ubuntu host with its own `IntelDemoWLAN`
+access point, started remotely from a Windows laptop — use:
+
+| File | Purpose |
+|------|---------|
+| [`setup-showroom-host.sh`](setup-showroom-host.sh) | One-shot preparation of the Ubuntu host (repo at a pinned commit, access point, key-based SSH account, dependencies, one-time model conversion, desktop launcher) |
+| [`StartPreview.ps1`](StartPreview.ps1) + [`RunDemo.bat`](RunDemo.bat) | Windows client: connects to the access point, starts the demo over SSH with `HOST_IP=192.168.100.1` and opens the dashboard |
+| [`remote-preview-setup.md`](remote-preview-setup.md) | Full setup and troubleshooting guide |
+| [`end-user-guide.md`](end-user-guide.md) | Short operating instructions for the person running the demo at the booth |
+
 ### Relation to the application quick start
 
 The demo automates the [quick start guide](../live-video-captioning/docs/user-guide/quick-start-guide.md)
@@ -158,5 +170,7 @@ VLM_MODEL=OpenGVLab/InternVL2-2B ./run-demo-captioning.sh
 - 📄 [live-video-captioning — Quick Start](../live-video-captioning/docs/user-guide/quick-start-guide.md)
 - 📄 [live-video-captioning — Get Started](../live-video-captioning/docs/user-guide/get-started.md)
 - 📄 [Simulated RTSP streams](../live-video-captioning/docs/user-guide/get-started/simulated-rtsp-stream-guide.md)
+- 📄 [Remote preview setup](remote-preview-setup.md) — showroom host + Windows client
+- 📄 [End-user guide](end-user-guide.md) — booth operating instructions
 - 📁 [`deprecated/`](./deprecated/README.md) — scripts from the previous showroom flow
 

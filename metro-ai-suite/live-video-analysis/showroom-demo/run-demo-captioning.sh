@@ -48,6 +48,15 @@ bash "${SCRIPT_DIR}/stop-all-demos.sh"
 log "Regenerating ${APP_DIR}/.env"
 bash "${APP_DIR}/scripts/setup_env.sh" --force
 
+# setup_env.sh derives HOST_IP from the default route, which is not the Wi-Fi
+# access point address on the showroom machine. Allow the caller (the desktop
+# launcher and StartPreview.ps1 both pass HOST_IP=192.168.100.1) to pin it, so
+# WebRTC and the RTSP streams stay reachable from the client laptop.
+if [[ -n "${HOST_IP:-}" ]]; then
+  sed -i "s|^HOST_IP=.*|HOST_IP=${HOST_IP}|" "${APP_DIR}/.env"
+  log "Pinned HOST_IP=${HOST_IP} from the environment"
+fi
+
 # --force resets .env to the template, so re-apply the Hugging Face token from
 # the environment (needed for gated models). Never store it in a tracked file.
 if [[ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]]; then
