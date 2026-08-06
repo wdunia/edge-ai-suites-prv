@@ -100,33 +100,52 @@ bash "${SCRIPT_DIR}/run-pipelines.sh"
 
 # 6. Open the dashboard in a clean, full-screen browser window.
 #    A throwaway profile directory is used so the demo never restores tabs,
-#    sessions or bookmarks from a previous run, and --kiosk starts full screen.
+#    sessions or bookmarks from a previous run.
+#    Full screen is requested with --start-fullscreen. --kiosk is opt-in
+#    (DEMO_BROWSER_KIOSK=1) because on some desktops it renders a black window.
 APP_URL="http://${HOST_IP}:${DASHBOARD_PORT}"
 log "Dashboard: ${APP_URL}"
 
 BROWSER_PID_FILE="${SCRIPT_DIR}/.browser.pid"
 BROWSER_PROFILE_DIR="${SCRIPT_DIR}/.browser-profile"
+DEMO_BROWSER_KIOSK="${DEMO_BROWSER_KIOSK:-0}"
 
 open_dashboard() {
   # Always start from an empty profile: no restored tabs, no session prompt.
   rm -rf "${BROWSER_PROFILE_DIR}"
   mkdir -p "${BROWSER_PROFILE_DIR}"
 
+  # Flags that avoid the "black window" symptoms seen with a fresh profile:
+  #  - password-store/mock-keychain: no blocking keyring unlock dialog,
+  #  - CalculateNativeWinOcclusion: Chromium sometimes stops painting a window
+  #    it wrongly considers hidden,
+  #  - disable-features=Translate*/first-run UI: nothing overlays the dashboard.
+  local common_args=(
+    --user-data-dir="${BROWSER_PROFILE_DIR}"
+    --start-fullscreen
+    --new-window
+    --no-first-run
+    --no-default-browser-check
+    --disable-session-crashed-bubble
+    --disable-infobars
+    --password-store=basic
+    --use-mock-keychain
+    --disable-features=CalculateNativeWinOcclusion,TranslateUI
+  )
+  [[ "${DEMO_BROWSER_KIOSK}" == "1" ]] && common_args+=(--kiosk)
+
   local browser
   for browser in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable; do
     if command -v "${browser}" >/dev/null 2>&1; then
-      setsid "${browser}" \
-        --user-data-dir="${BROWSER_PROFILE_DIR}" \
-        --kiosk \
-        --start-fullscreen \
-        --no-first-run \
-        --no-default-browser-check \
-        --disable-session-crashed-bubble \
-        --disable-infobars \
-        --new-window \
-        "${APP_URL}" >/dev/null 2>&1 &
+      setsid "${browser}" "${common_args[@]}" "${APP_URL}" >/dev/null 2>&1 &
       echo $! > "${BROWSER_PID_FILE}"
-      log "Opened ${browser} in kiosk mode (clean profile)"
+      log "Opened ${browser} full screen (clean profile)"
+      # Some window managers ignore --start-fullscreen; ask them directly.
+      if command -v wmctrl >/dev/null 2>&1; then
+        (sleep 6; wmctrl -r :ACTIVE: -b add,fullscreen >/dev/null 2>&1) &
+      elif command -v xdotool >/dev/null 2>&1; then
+        (sleep 6; xdotool key --clearmodifiers F11 >/dev/null 2>&1) &
+      fi
       return 0
     fi
   done
