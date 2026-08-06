@@ -109,8 +109,8 @@ log "Dashboard: ${APP_URL}"
 BROWSER_PID_FILE="${SCRIPT_DIR}/.browser.pid"
 BROWSER_PROFILE_DIR="${SCRIPT_DIR}/.browser-profile"
 
-# Screen geometry (WIDTHxHEIGHT), used when the window manager ignores
-# --start-maximized.
+# Screen geometry (WIDTHxHEIGHT) of the primary monitor, used to size the
+# browser window.
 screen_size() {
   local geom=""
   if command -v xrandr >/dev/null 2>&1; then
@@ -122,45 +122,39 @@ screen_size() {
   echo "${geom}"
 }
 
-# Maximize the browser window once it appears. The window is matched by its
-# WM class ($1 is an extended regex, e.g. "chrom|edge"), never by ":ACTIVE:",
-# which would resize the terminal the demo was started from. The browser needs
-# a few seconds to map its window, so the lookup is retried in the background.
-maximize_browser_window() {
-  local class_pattern="$1"
-
-  if ! command -v wmctrl >/dev/null 2>&1 && ! command -v xdotool >/dev/null 2>&1; then
-    log "wmctrl/xdotool not installed - cannot maximize the window (run ./install-dependencies.sh)"
-    return 0
+# Firefox has no command line option for the window size: it restores the window
+# geometry from xulstore.json inside the profile. Because the demo starts from an
+# empty profile every time, Firefox would fall back to its small default window,
+# so the profile is seeded with a maximized main window before it is started.
+seed_firefox_profile() {
+  local geom width height
+  geom="$(screen_size)"
+  if [[ "${geom}" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    width="${BASH_REMATCH[1]}"
+    height="${BASH_REMATCH[2]}"
+  else
+    width=1920
+    height=1080
   fi
 
-  (
-    local attempt win
-    for attempt in $(seq 1 30); do
-      if command -v wmctrl >/dev/null 2>&1; then
-        # wmctrl -lx lists "<id> <desktop> <class> <host> <title>".
-        win="$(wmctrl -lx 2>/dev/null | awk '{print $1, $3}' \
-                | grep -Ei "${class_pattern}" | head -1 | awk '{print $1}')"
-        if [[ -n "${win}" ]]; then
-          wmctrl -i -a "${win}" >/dev/null 2>&1
-          wmctrl -i -r "${win}" -b add,maximized_vert,maximized_horz >/dev/null 2>&1
-          exit 0
-        fi
-      fi
-      if command -v xdotool >/dev/null 2>&1; then
-        win="$(xdotool search --onlyvisible --class "${class_pattern}" 2>/dev/null | head -1)"
-        if [[ -n "${win}" ]]; then
-          xdotool windowactivate "${win}" >/dev/null 2>&1
-          xdotool windowmove "${win}" 0 0 windowsize "${win}" 100% 100% >/dev/null 2>&1
-          exit 0
-        fi
-      fi
-      sleep 1
-    done
-  ) &
+  cat > "${BROWSER_PROFILE_DIR}/xulstore.json" <<EOF
+{"chrome://browser/content/browser.xhtml":{"main-window":{"screenX":"0","screenY":"0","width":"${width}","height":"${height}","sizemode":"maximized"}}}
+EOF
+
+  # Skip the "welcome"/"what's new" tabs a brand new profile would open on top
+  # of the dashboard.
+  cat > "${BROWSER_PROFILE_DIR}/user.js" <<'EOF'
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("datareporting.policy.firstRunURL", "");
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.sessionstore.resume_from_crash", false);
+EOF
 }
 
 open_dashboard() {
+  log "Desktop session: ${XDG_SESSION_TYPE:-unknown} (DISPLAY=${DISPLAY:-none}, screen=$(screen_size))"
+
   # Always start from an empty profile: no restored tabs, no session prompt.
   rm -rf "${BROWSER_PROFILE_DIR}"
   mkdir -p "${BROWSER_PROFILE_DIR}"
@@ -180,8 +174,7 @@ open_dashboard() {
     --use-mock-keychain
   )
 
-  # Explicit window size as a fallback for window managers that ignore
-  # --start-maximized.
+  # Explicit window size for window managers that ignore --start-maximized.
   local geom
   geom="$(screen_size)"
   if [[ "${geom}" =~ ^([0-9]+)x([0-9]+)$ ]]; then
@@ -194,18 +187,18 @@ open_dashboard() {
       setsid "${browser}" "${common_args[@]}" "${APP_URL}" >/dev/null 2>&1 &
       echo $! > "${BROWSER_PID_FILE}"
       log "Opened ${browser} maximized with a clean profile"
-      maximize_browser_window "chrom|edge"
       return 0
     fi
   done
 
   if command -v firefox >/dev/null 2>&1; then
+    # Firefox ignores window-size command line options; the geometry comes from
+    # the profile, so it is prepared first.
+    seed_firefox_profile
     setsid firefox --profile "${BROWSER_PROFILE_DIR}" --no-remote --new-window \
       "${APP_URL}" >/dev/null 2>&1 &
     echo $! > "${BROWSER_PID_FILE}"
-    log "Opened firefox with a clean profile"
-    # Firefox has no --start-maximized; the window manager has to do it.
-    maximize_browser_window "firefox|navigator"
+    log "Opened firefox maximized with a clean profile"
     return 0
   fi
 

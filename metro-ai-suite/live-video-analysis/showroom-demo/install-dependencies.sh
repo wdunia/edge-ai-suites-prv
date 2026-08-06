@@ -25,11 +25,9 @@ sudo apt install -y jq curl
 # ffmpeg also publishes the looped RTSP demo streams.
 sudo apt install -y ffmpeg
 
-# Window helpers used by run-demo-captioning.sh to open the dashboard maximized:
-#   wmctrl            - maximizes the window if the WM ignores --start-maximized
-#   x11-xserver-utils - xrandr, used to detect the screen resolution
-#   x11-utils         - xdpyinfo, fallback resolution detection
-sudo apt install -y wmctrl x11-xserver-utils x11-utils
+# Screen-resolution helpers used by run-demo-captioning.sh to size the browser
+# window (xrandr, with xdpyinfo as fallback).
+sudo apt install -y x11-xserver-utils x11-utils
 
 # Docker Engine (skipped if already installed)
 if ! command -v docker &> /dev/null; then
