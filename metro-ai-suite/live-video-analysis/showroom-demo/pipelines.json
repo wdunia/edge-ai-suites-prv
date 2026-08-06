@@ -22,10 +22,11 @@
       "prompt": "Is there a car accident visible? Describe in less than 15 words."
     },
     {
-      "runName": "USB-Camera",
-      "source": "camera",
-      "prompt": "Is there a fire visible? Describe in less than 10 words.",
-      "maxNewTokens": 10
+      "runName": "News-headline",
+      "source": "file",
+      "prompt": "Create a headline for a TV news story that describes what happened and draws on random elements of the scene to convey a sense of hope.",
+      "maxNewTokens": 30,
+      "vlmDevice": "cpu"
     }
   ]
 }
