@@ -98,12 +98,54 @@ compose up -d
 # 5. Start the demo pipelines (USB camera + video files) before opening the UI.
 bash "${SCRIPT_DIR}/run-pipelines.sh"
 
-# 6. Open the dashboard.
+# 6. Open the dashboard in a clean, full-screen browser window.
+#    A throwaway profile directory is used so the demo never restores tabs,
+#    sessions or bookmarks from a previous run, and --kiosk starts full screen.
 APP_URL="http://${HOST_IP}:${DASHBOARD_PORT}"
 log "Dashboard: ${APP_URL}"
-if command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "${APP_URL}" >/dev/null 2>&1 &
-fi
+
+BROWSER_PID_FILE="${SCRIPT_DIR}/.browser.pid"
+BROWSER_PROFILE_DIR="${SCRIPT_DIR}/.browser-profile"
+
+open_dashboard() {
+  # Always start from an empty profile: no restored tabs, no session prompt.
+  rm -rf "${BROWSER_PROFILE_DIR}"
+  mkdir -p "${BROWSER_PROFILE_DIR}"
+
+  local browser
+  for browser in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable; do
+    if command -v "${browser}" >/dev/null 2>&1; then
+      setsid "${browser}" \
+        --user-data-dir="${BROWSER_PROFILE_DIR}" \
+        --kiosk \
+        --start-fullscreen \
+        --no-first-run \
+        --no-default-browser-check \
+        --disable-session-crashed-bubble \
+        --disable-infobars \
+        --new-window \
+        "${APP_URL}" >/dev/null 2>&1 &
+      echo $! > "${BROWSER_PID_FILE}"
+      log "Opened ${browser} in kiosk mode (clean profile)"
+      return 0
+    fi
+  done
+
+  if command -v firefox >/dev/null 2>&1; then
+    setsid firefox --profile "${BROWSER_PROFILE_DIR}" --no-remote --kiosk \
+      "${APP_URL}" >/dev/null 2>&1 &
+    echo $! > "${BROWSER_PID_FILE}"
+    log "Opened firefox in kiosk mode (clean profile)"
+    return 0
+  fi
+
+  if command -v xdg-open >/dev/null 2>&1; then
+    log "No Chromium/Firefox found; falling back to xdg-open (press F11 for full screen)"
+    xdg-open "${APP_URL}" >/dev/null 2>&1 &
+  fi
+}
+
+open_dashboard
 
 log "Demo is running. Press Ctrl+C to stop."
 while true; do

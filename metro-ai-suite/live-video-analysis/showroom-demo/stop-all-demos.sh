@@ -14,6 +14,22 @@ DEMO_ENV="${SCRIPT_DIR}/captioning-demo.env"
 RTSP_PID_FILE="${SCRIPT_DIR}/.rtsp-publisher.pid"
 RTSP_CONFIG="${SCRIPT_DIR}/.rtsp-streams.json"
 RTSP_CONTAINER="mediamtx-server"
+BROWSER_PID_FILE="${SCRIPT_DIR}/.browser.pid"
+BROWSER_PROFILE_DIR="${SCRIPT_DIR}/.browser-profile"
+
+# Close the kiosk browser window started by run-demo-captioning.sh so the next
+# run always opens a fresh window instead of reusing the old tab.
+if [[ -f "${BROWSER_PID_FILE}" ]]; then
+  echo "Closing demo browser..."
+  bpid="$(cat "${BROWSER_PID_FILE}")"
+  if [[ -n "${bpid}" ]]; then
+    kill -TERM "-${bpid}" 2>/dev/null || kill -TERM "${bpid}" 2>/dev/null || true
+    sleep 1
+    kill -KILL "-${bpid}" 2>/dev/null || kill -KILL "${bpid}" 2>/dev/null || true
+  fi
+  rm -f "${BROWSER_PID_FILE}"
+fi
+rm -rf "${BROWSER_PROFILE_DIR}"
 
 echo "Stopping RTSP publisher..."
 if [[ -f "${RTSP_PID_FILE}" ]]; then
