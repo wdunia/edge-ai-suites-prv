@@ -98,16 +98,29 @@ compose up -d
 # 5. Start the demo pipelines (USB camera + video files) before opening the UI.
 bash "${SCRIPT_DIR}/run-pipelines.sh"
 
-# 6. Open the dashboard in a clean browser window.
+# 6. Open the dashboard in a clean, maximized browser window.
 #    A throwaway profile directory is used so the demo never restores tabs,
-#    sessions or bookmarks from a previous run. The window is a normal one:
-#    full-screen/kiosk mode showed a black window on this machine, so the
-#    operator can simply press F11 if a full-screen view is wanted.
+#    sessions or bookmarks from a previous run. The window is maximized (not
+#    full screen/kiosk - that rendered a black window on this machine), so the
+#    dashboard fills the whole screen.
 APP_URL="http://${HOST_IP}:${DASHBOARD_PORT}"
 log "Dashboard: ${APP_URL}"
 
 BROWSER_PID_FILE="${SCRIPT_DIR}/.browser.pid"
 BROWSER_PROFILE_DIR="${SCRIPT_DIR}/.browser-profile"
+
+# Screen geometry (WIDTHxHEIGHT), used when the window manager ignores
+# --start-maximized.
+screen_size() {
+  local geom=""
+  if command -v xrandr >/dev/null 2>&1; then
+    geom="$(xrandr 2>/dev/null | awk '/\*/ {print $1; exit}')"
+  fi
+  if [[ -z "${geom}" ]] && command -v xdpyinfo >/dev/null 2>&1; then
+    geom="$(xdpyinfo 2>/dev/null | awk '/dimensions:/ {print $2; exit}')"
+  fi
+  echo "${geom}"
+}
 
 open_dashboard() {
   # Always start from an empty profile: no restored tabs, no session prompt.
@@ -119,6 +132,8 @@ open_dashboard() {
   local common_args=(
     --user-data-dir="${BROWSER_PROFILE_DIR}"
     --new-window
+    --start-maximized
+    --window-position=0,0
     --no-first-run
     --no-default-browser-check
     --disable-session-crashed-bubble
@@ -127,12 +142,30 @@ open_dashboard() {
     --use-mock-keychain
   )
 
+  # Explicit window size as a fallback for window managers that ignore
+  # --start-maximized.
+  local geom
+  geom="$(screen_size)"
+  if [[ "${geom}" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    common_args+=(--window-size="${BASH_REMATCH[1]},${BASH_REMATCH[2]}")
+  fi
+
+  # Last resort: ask the window manager to maximize the demo window.
+  maximize_later() {
+    if command -v wmctrl >/dev/null 2>&1; then
+      (sleep 6; wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz >/dev/null 2>&1) &
+    elif command -v xdotool >/dev/null 2>&1; then
+      (sleep 6; xdotool getactivewindow windowsize 100% 100% windowmove 0 0 >/dev/null 2>&1) &
+    fi
+  }
+
   local browser
   for browser in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable; do
     if command -v "${browser}" >/dev/null 2>&1; then
       setsid "${browser}" "${common_args[@]}" "${APP_URL}" >/dev/null 2>&1 &
       echo $! > "${BROWSER_PID_FILE}"
-      log "Opened ${browser} with a clean profile (press F11 for full screen)"
+      log "Opened ${browser} maximized with a clean profile"
+      maximize_later
       return 0
     fi
   done
@@ -141,12 +174,13 @@ open_dashboard() {
     setsid firefox --profile "${BROWSER_PROFILE_DIR}" --no-remote --new-window \
       "${APP_URL}" >/dev/null 2>&1 &
     echo $! > "${BROWSER_PID_FILE}"
-    log "Opened firefox with a clean profile (press F11 for full screen)"
+    log "Opened firefox with a clean profile"
+    maximize_later
     return 0
   fi
 
   if command -v xdg-open >/dev/null 2>&1; then
-    log "No Chromium/Firefox found; falling back to xdg-open (press F11 for full screen)"
+    log "No Chromium/Firefox found; falling back to xdg-open"
     xdg-open "${APP_URL}" >/dev/null 2>&1 &
   fi
 }
@@ -157,4 +191,3 @@ log "Demo is running. Press Ctrl+C to stop."
 while true; do
   sleep 3600
 done
-
