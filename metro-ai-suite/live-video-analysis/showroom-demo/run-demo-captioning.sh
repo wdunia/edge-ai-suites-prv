@@ -122,6 +122,44 @@ screen_size() {
   echo "${geom}"
 }
 
+# Maximize the browser window once it appears. The window is matched by its
+# WM class ($1 is an extended regex, e.g. "chrom|edge"), never by ":ACTIVE:",
+# which would resize the terminal the demo was started from. The browser needs
+# a few seconds to map its window, so the lookup is retried in the background.
+maximize_browser_window() {
+  local class_pattern="$1"
+
+  if ! command -v wmctrl >/dev/null 2>&1 && ! command -v xdotool >/dev/null 2>&1; then
+    log "wmctrl/xdotool not installed - cannot maximize the window (run ./install-dependencies.sh)"
+    return 0
+  fi
+
+  (
+    local attempt win
+    for attempt in $(seq 1 30); do
+      if command -v wmctrl >/dev/null 2>&1; then
+        # wmctrl -lx lists "<id> <desktop> <class> <host> <title>".
+        win="$(wmctrl -lx 2>/dev/null | awk '{print $1, $3}' \
+                | grep -Ei "${class_pattern}" | head -1 | awk '{print $1}')"
+        if [[ -n "${win}" ]]; then
+          wmctrl -i -a "${win}" >/dev/null 2>&1
+          wmctrl -i -r "${win}" -b add,maximized_vert,maximized_horz >/dev/null 2>&1
+          exit 0
+        fi
+      fi
+      if command -v xdotool >/dev/null 2>&1; then
+        win="$(xdotool search --onlyvisible --class "${class_pattern}" 2>/dev/null | head -1)"
+        if [[ -n "${win}" ]]; then
+          xdotool windowactivate "${win}" >/dev/null 2>&1
+          xdotool windowmove "${win}" 0 0 windowsize "${win}" 100% 100% >/dev/null 2>&1
+          exit 0
+        fi
+      fi
+      sleep 1
+    done
+  ) &
+}
+
 open_dashboard() {
   # Always start from an empty profile: no restored tabs, no session prompt.
   rm -rf "${BROWSER_PROFILE_DIR}"
@@ -150,22 +188,13 @@ open_dashboard() {
     common_args+=(--window-size="${BASH_REMATCH[1]},${BASH_REMATCH[2]}")
   fi
 
-  # Last resort: ask the window manager to maximize the demo window.
-  maximize_later() {
-    if command -v wmctrl >/dev/null 2>&1; then
-      (sleep 6; wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz >/dev/null 2>&1) &
-    elif command -v xdotool >/dev/null 2>&1; then
-      (sleep 6; xdotool getactivewindow windowsize 100% 100% windowmove 0 0 >/dev/null 2>&1) &
-    fi
-  }
-
   local browser
   for browser in google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable; do
     if command -v "${browser}" >/dev/null 2>&1; then
       setsid "${browser}" "${common_args[@]}" "${APP_URL}" >/dev/null 2>&1 &
       echo $! > "${BROWSER_PID_FILE}"
       log "Opened ${browser} maximized with a clean profile"
-      maximize_later
+      maximize_browser_window "chrom|edge"
       return 0
     fi
   done
@@ -175,7 +204,8 @@ open_dashboard() {
       "${APP_URL}" >/dev/null 2>&1 &
     echo $! > "${BROWSER_PID_FILE}"
     log "Opened firefox with a clean profile"
-    maximize_later
+    # Firefox has no --start-maximized; the window manager has to do it.
+    maximize_browser_window "firefox|navigator"
     return 0
   fi
 
