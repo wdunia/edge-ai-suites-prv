@@ -154,15 +154,24 @@ wait_for_health() {
   die "Service did not become healthy within ${HEALTH_TIMEOUT}s. Check: docker logs video-caption-service"
 }
 
-resolve_model() {
-  local models model
-  models="$("${CURL[@]}" -m 10 "${API}/vlm-models")" || die "Cannot query ${API}/vlm-models"
-  model="$(jq -r --arg dev "${VLM_DEVICE}" \
-    'first(.models[] | select((.device // "" | ascii_downcase) == $dev) | .name) // empty' <<<"${models}")"
-  if [[ -z "${model}" ]]; then
-    die "No VLM model available for device '${VLM_DEVICE}'. Convert one with:
-  ${APP_DIR}/model_download_scripts/download_models.sh --model OpenGVLab/InternVL2-1B --type vlm --weight-format int8 --device ${VLM_DEVICE^^}"
+VLM_MODELS_JSON=""
+declare -A MODEL_BY_DEVICE=()
+
+load_models() {
+  VLM_MODELS_JSON="$("${CURL[@]}" -m 10 "${API}/vlm-models")" || die "Cannot query ${API}/vlm-models"
+}
+
+# Prints the converted model for a device, or returns 1 when none exists.
+model_for_device() {
+  local device="$1" model
+  if [[ -n "${MODEL_BY_DEVICE[${device}]:-}" ]]; then
+    echo "${MODEL_BY_DEVICE[${device}]}"
+    return 0
   fi
+  model="$(jq -r --arg dev "${device}" \
+    'first(.models[] | select((.device // "" | ascii_downcase) == $dev) | .name) // empty' <<<"${VLM_MODELS_JSON}")"
+  [[ -n "${model}" ]] || return 1
+  MODEL_BY_DEVICE["${device}"]="${model}"
   echo "${model}"
 }
 
@@ -197,10 +206,19 @@ wait_stream_ready() {
 }
 
 start_run() {
-  local run_json="$1" model="$2" stream_index="${3:-}"
-  local run_name source_type source_uri payload response run_id
+  local run_json="$1" stream_index="${2:-}"
+  local run_name source_type source_uri payload response run_id run_device model
 
   run_name="$(jq -r '.runName' <<<"${run_json}")"
+
+  # A run may pin its own VLM device to spread the load across GPU and CPU.
+  run_device="$(jq -r '.vlmDevice // empty' <<<"${run_json}" | tr '[:upper:]' '[:lower:]')"
+  run_device="${run_device:-${VLM_DEVICE}}"
+  if ! model="$(model_for_device "${run_device}")"; then
+    warn "No VLM model converted for '${run_device}'; run '${run_name}' falls back to ${VLM_DEVICE^^}."
+    run_device="${VLM_DEVICE}"
+    model="$(model_for_device "${run_device}")"
+  fi
 
   if [[ "$(jq -r '.source' <<<"${run_json}")" == "camera" ]]; then
     source_type="camera"
@@ -219,7 +237,7 @@ start_run() {
     --arg sourceType "${source_type}" \
     --arg pipelineType "${PIPELINE_TYPE}" \
     --arg model "${model}" \
-    --arg device "${VLM_DEVICE}" \
+    --arg device "${run_device}" \
     --argjson defaults "${RUN_DEFAULTS}" \
     --argjson run "${run_json}" \
     '($defaults + ($run | with_entries(select(.value != null)))) as $cfg
@@ -244,7 +262,7 @@ Check 'docker logs ${PIPELINE_SERVER_CONTAINER}'. Common causes: too many concur
 or a missing no_proxy entry for ${HOST_IP} (see live-video-captioning/docs/user-guide/known-issues.md)."
   fi
 
-  log "Starting run '${run_name}' on ${source_uri}"
+  log "Starting run '${run_name}' on ${source_uri} (${run_device^^})"
   response="$("${CURL[@]}" -X POST "${API}/generate_captions_alerts" \
     -H 'Content-Type: application/json' -d "${payload}")" || {
       warn "Request failed for run '${run_name}'."
@@ -279,8 +297,12 @@ print_summary() {
 start_rtsp_publisher
 wait_for_health
 
-MODEL="$(resolve_model)"
-log "Using VLM model '${MODEL}' on ${VLM_DEVICE^^}"
+load_models
+if ! MODEL="$(model_for_device "${VLM_DEVICE}")"; then
+  die "No VLM model available for device '${VLM_DEVICE}'. Convert one with:
+  ${APP_DIR}/model_download_scripts/download_models.sh --model OpenGVLab/InternVL2-1B --type vlm --weight-format int8 --device ${VLM_DEVICE^^}"
+fi
+log "Default VLM model '${MODEL}' on ${VLM_DEVICE^^}"
 
 stream_index=0
 while IFS= read -r run_json; do
@@ -290,9 +312,9 @@ while IFS= read -r run_json; do
       warn "No video published for run '$(jq -r '.runName' <<<"${run_json}")'; skipping."
       continue
     fi
-    start_run "${run_json}" "${MODEL}" "${stream_index}"
+    start_run "${run_json}" "${stream_index}"
   else
-    start_run "${run_json}" "${MODEL}"
+    start_run "${run_json}"
   fi
 done < <(jq -c '.runs[]' "${CONFIG_FILE}")
 

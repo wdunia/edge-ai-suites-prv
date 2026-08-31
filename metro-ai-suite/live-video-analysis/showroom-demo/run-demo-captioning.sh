@@ -14,9 +14,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/../live-video-captioning" && pwd)"
 DEMO_ENV="${SCRIPT_DIR}/captioning-demo.env"
+PIPELINES_FILE="${SCRIPT_DIR}/pipelines.json"
 
 VLM_MODEL="${VLM_MODEL:-OpenGVLab/InternVL2-1B}"
-VLM_DEVICE="GPU"
 WEIGHT_FORMAT="${WEIGHT_FORMAT:-int8}"
 
 log()  { echo "[demo] $*"; }
@@ -40,6 +40,7 @@ trap cleanup INT TERM EXIT
 command -v docker >/dev/null 2>&1 || die "Docker is required. Run ./install-dependencies.sh first."
 command -v jq >/dev/null 2>&1 || die "jq is required. Run ./install-dependencies.sh first."
 [[ -f "${DEMO_ENV}" ]] || die "Missing demo overrides: ${DEMO_ENV}"
+[[ -f "${PIPELINES_FILE}" ]] || die "Missing pipeline configuration: ${PIPELINES_FILE}"
 
 # 1. Stop whatever is still running from a previous demo session.
 bash "${SCRIPT_DIR}/stop-all-demos.sh"
@@ -77,19 +78,27 @@ export no_proxy="${NO_PROXY_BASE}${no_proxy:+,${no_proxy}}"
 export NO_PROXY="${NO_PROXY_BASE}${NO_PROXY:+,${NO_PROXY}}"
 log "no_proxy=${no_proxy}"
 
-# 3. Download and convert the VLM once (quick-start step 3, with --device GPU).
-#    The guard keeps the "one-time" behaviour across demo restarts.
-MODEL_DIR="${APP_DIR}/ov_models/$(echo "${VLM_DEVICE}" | tr '[:upper:]' '[:lower:]')/${VLM_MODEL##*/}"
-if [[ -d "${MODEL_DIR}" ]]; then
-  log "VLM already available: ${MODEL_DIR}"
-else
-  log "Downloading and converting ${VLM_MODEL} for ${VLM_DEVICE} (one-time, several minutes)..."
-  bash "${APP_DIR}/model_download_scripts/download_models.sh" \
-    --model "${VLM_MODEL}" \
-    --type vlm \
-    --weight-format "${WEIGHT_FORMAT}" \
-    --device "${VLM_DEVICE}"
-fi
+# 3. Download and convert the VLM once (quick-start step 3) for every device the
+#    demo runs on. The guard keeps the "one-time" behaviour across demo restarts.
+VLM_DEVICES=()
+while IFS= read -r device; do
+  VLM_DEVICES+=("${device}")
+done < <(jq -r '[(.vlmDevice // "gpu")] + [.runs[].vlmDevice // empty] | map(ascii_upcase) | unique | .[]' "${PIPELINES_FILE}")
+[[ ${#VLM_DEVICES[@]} -gt 0 ]] || VLM_DEVICES=("GPU")
+
+for device in "${VLM_DEVICES[@]}"; do
+  MODEL_DIR="${APP_DIR}/ov_models/$(echo "${device}" | tr '[:upper:]' '[:lower:]')/${VLM_MODEL##*/}"
+  if [[ -d "${MODEL_DIR}" ]]; then
+    log "VLM already available for ${device}: ${MODEL_DIR}"
+  else
+    log "Downloading and converting ${VLM_MODEL} for ${device} (one-time, several minutes)..."
+    bash "${APP_DIR}/model_download_scripts/download_models.sh" \
+      --model "${VLM_MODEL}" \
+      --type vlm \
+      --weight-format "${WEIGHT_FORMAT}" \
+      --device "${device}"
+  fi
+done
 
 # 4. Start the application stack with the showroom overrides.
 log "Starting live-video-captioning..."
