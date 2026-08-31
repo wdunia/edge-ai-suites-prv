@@ -36,7 +36,9 @@ class PipelineServer:
     WEBRTC_PEER_ID_MAX_LENGTH = 8
     WEBRTC_PEER_ID_PREFIX = "s"
     DEFAULT_RESOLUTION_SUFFIX = "_Default_Resolution"
-    SCHEDULER_CONFIG = f"max_num_batched_tokens=256,cache_size={VLM_CACHE_SIZE},enable_prefix_caching=true,dynamic_split_fuse=true,use_cache_eviction=true"
+    # use_cache_eviction must stay false: together with prefix caching it corrupts KV block
+    # reference counts on long runs ("m_ref_count > 0" / "BlockAllocator leaked blocks").
+    SCHEDULER_CONFIG = f"max_num_batched_tokens=256,cache_size={VLM_CACHE_SIZE},enable_prefix_caching=true,dynamic_split_fuse=true,use_cache_eviction=false"
     HEALTHY_PIPELINE_STATES = {"running", "queued"}
 
     @staticmethod
