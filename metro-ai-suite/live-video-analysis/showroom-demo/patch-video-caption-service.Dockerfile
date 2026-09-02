@@ -25,10 +25,11 @@
 ARG BASE_IMAGE=intel/video-caption-service:latest
 FROM ${BASE_IMAGE}
 
-# grep first so the build fails loudly if the released image no longer contains the
-# expected string, instead of producing a silently unpatched image.
+# The trailing grep is a postcondition: it fails the build if the substitution did not
+# apply, so an unpatched image cannot pass silently.
 USER root
-RUN grep -c 'use_cache_eviction=true' /app/backend/services/pipeline_server.py \
-    && sed -i 's/use_cache_eviction=true/use_cache_eviction=false/' /app/backend/services/pipeline_server.py \
-    && grep -n 'SCHEDULER_CONFIG' /app/backend/services/pipeline_server.py
+RUN sed -i 's/enable_prefix_caching=true,dynamic_split_fuse=true,use_cache_eviction=true/enable_prefix_caching=false,dynamic_split_fuse=true,use_cache_eviction=false/' \
+           /app/backend/services/pipeline_server.py \
+    && grep -n 'enable_prefix_caching=false,dynamic_split_fuse=true,use_cache_eviction=false' \
+       /app/backend/services/pipeline_server.py
 USER appuser
