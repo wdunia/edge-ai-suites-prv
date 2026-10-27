@@ -75,7 +75,8 @@ with these showroom-specific choices:
 ./install-dependencies.sh
 ```
 
-**2. Connect a USB camera** — any UVC webcam that provides MJPG/YUYV output.
+**2. Connect a USB camera** — it must provide raw 640×480 video at 15 fps
+(for example YUYV; MJPEG-only modes will not work with this pipeline).
 Verify it is detected:
 
 ```bash
@@ -120,12 +121,12 @@ shared run defaults `maxNewTokens`, `frameRate` and `chunkSize`. Every run defin
 `runName`, `source` (`camera` or `file`) and `prompt`, and may override any default
 (including the optional `frameWidth`/`frameHeight`).
 
-> **Latency tuning:** the demo deliberately leaves `frameWidth`/`frameHeight` unset,
-> which selects the `*_Default_Resolution` pipelines and keeps the source resolution.
-> Measurements on the showroom machine showed this to be *faster* than forcing a
-> smaller frame (the extra scaling step costs more than the tokens it saves):
-> camera alone ≈1.6 s TTFT / <1 s lag, and with all four runs ≈1.5 s TTFT / ~2 s lag
-> for the file streams. `maxNewTokens` remains the most direct lever on caption lag.
+> **Camera capture:** the GPU camera pipeline in
+> `../live-video-captioning/config.json` requests raw 640×480 at 15 fps from
+> `/dev/video0`. Check `./list-camera-formats.sh` on the demo host: the camera
+> must support this raw mode. `frameWidth`/`frameHeight` in `pipelines.json`
+> control the frame passed to inference, not the USB capture mode.
+> `maxNewTokens` remains the most direct lever on caption generation lag.
 
 **Script overrides** (environment variables):
 
@@ -145,7 +146,7 @@ VLM_MODEL=OpenGVLab/InternVL2-2B ./run-demo-captioning.sh
 | `Run ... was not ready in 300s` for the file runs | The pipeline server cannot pull `rtsp://<HOST_IP>:8554/streamN`. Add the host IP (and your local ranges) to `no_proxy` in `/etc/environment`, then `source /etc/environment` and restart the demo. See [known issues](../live-video-captioning/docs/user-guide/known-issues.md#rtsp-stream-not-reachable-from-live-video-captioning-application). |
 | `Pipeline server unreachable ... Temporary failure in name resolution` | `dlstreamer-pipeline-server` exited, so Docker DNS cannot resolve it. Inspect `docker logs dlstreamer-pipeline-server` — usually resource pressure from too many concurrent GPU streams or a proxy-related segfault. Reduce the number of runs in `pipelines.json` or lower `frameWidth`/`frameHeight`. |
 | Only some runs start | Concurrent GPU capacity is limited; scale gradually (start with camera + 1 file run) and check `docker stats` / the dashboard metrics. |
-| One run has much higher TTFT/lag than the others | Compare `maxNewTokens` and the frame resolution in `pipelines.json`. Forcing `frameWidth`/`frameHeight` adds a scaling step that on this hardware costs more than it saves — leaving them unset (Default resolution) measured fastest. |
+| One run has much higher TTFT/lag than the others | Compare `maxNewTokens` and the frame resolution in `pipelines.json`. If the camera is affected, verify its supported raw capture modes with `./list-camera-formats.sh` and try fewer concurrent GPU runs. |
 | The USB camera lags more than the file streams under load | Expected with four concurrent GPU pipelines: the live capture keeps the GPU busy alongside inference. Run fewer streams if the camera lag matters most. |
 | `No VLM model available for device 'gpu'` | Rerun the demo; it converts the model, or run `../live-video-captioning/model_download_scripts/download_models.sh --model OpenGVLab/InternVL2-1B --type vlm --weight-format int8 --device GPU` |
 | Camera run is skipped | `/dev/video0` missing — check `ls /dev/video*` and `cameraDevice` in `pipelines.json` |
@@ -173,4 +174,3 @@ VLM_MODEL=OpenGVLab/InternVL2-2B ./run-demo-captioning.sh
 - 📄 [Remote preview setup](remote-preview-setup.md) — showroom host + Windows client
 - 📄 [End-user guide](end-user-guide.md) — booth operating instructions
 - 📁 [`deprecated/`](./deprecated/README.md) — scripts from the previous showroom flow
-
